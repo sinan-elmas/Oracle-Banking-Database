@@ -1,0 +1,1154 @@
+-- ============================================================================
+-- Oracle Banking Database
+-- Module       : Testing / PL/SQL Tests / Package Tests
+-- Script       : 03_PKG_CUSTOMER_MANAGEMENT_Test.sql
+-- Purpose      : Validate customer creation, customer status management,
+--                customer information retrieval, audit integration,
+--                error handling, and transaction behavior
+-- Scope        : PKG_CUSTOMER_MANAGEMENT
+-- Safety       : Business-data changes are rolled back after testing
+-- Environment  : Oracle AI Database 26ai Enterprise Edition
+-- Version      : 23.26.1.0.0
+-- Schema       : BANKING_DB
+-- ============================================================================
+
+SET SERVEROUTPUT ON SIZE UNLIMITED
+SET DEFINE OFF
+SET VERIFY OFF
+SET FEEDBACK ON
+SET SQLBLANKLINES ON
+
+WHENEVER SQLERROR CONTINUE
+
+ALTER SESSION SET NLS_DATE_FORMAT = 'DD-MON-YYYY HH24:MI:SS';
+
+PROMPT
+PROMPT ================================================================================
+PROMPT PKG_CUSTOMER_MANAGEMENT - REGRESSION TEST SUITE
+PROMPT ================================================================================
+PROMPT
+
+DECLARE
+    ---------------------------------------------------------------------------
+    -- Test state
+    ---------------------------------------------------------------------------
+    l_test_token          VARCHAR2(30);
+    l_test_started_at     TIMESTAMP := SYSTIMESTAMP;
+
+    l_pass_count          PLS_INTEGER := 0;
+    l_fail_count          PLS_INTEGER := 0;
+    l_count               PLS_INTEGER;
+
+    ---------------------------------------------------------------------------
+    -- Generated test values
+    ---------------------------------------------------------------------------
+    l_customer_id         customers.customer_id%TYPE;
+    l_customer_no         customers.customer_no%TYPE;
+    l_company_id          companies.company_id%TYPE;
+    l_company_status      companies.status%TYPE;
+    l_customer_status     customers.status%TYPE;
+
+    l_national_id_1       VARCHAR2(11);
+    l_national_id_2       VARCHAR2(11);
+    l_tax_number_1        VARCHAR2(11);
+    l_tax_number_2        VARCHAR2(11);
+    l_registration_1      VARCHAR2(50);
+    l_registration_2      VARCHAR2(50);
+
+    ---------------------------------------------------------------------------
+    -- Existing-reference test values
+    ---------------------------------------------------------------------------
+    l_existing_customer_id customers.customer_id%TYPE;
+
+    ---------------------------------------------------------------------------
+    -- Cursor
+    ---------------------------------------------------------------------------
+    l_result_cursor       SYS_REFCURSOR;
+
+    ---------------------------------------------------------------------------
+    -- Test helpers
+    ---------------------------------------------------------------------------
+    PROCEDURE record_result(
+        p_test_name IN VARCHAR2,
+        p_passed    IN BOOLEAN,
+        p_details   IN VARCHAR2 DEFAULT NULL
+    ) IS
+    BEGIN
+        IF p_passed THEN
+            l_pass_count := l_pass_count + 1;
+            DBMS_OUTPUT.PUT_LINE('[PASS] ' || p_test_name);
+        ELSE
+            l_fail_count := l_fail_count + 1;
+
+            DBMS_OUTPUT.PUT_LINE(
+                '[FAIL] ' || p_test_name ||
+                CASE
+                    WHEN p_details IS NOT NULL
+                    THEN ' -> ' || p_details
+                END
+            );
+        END IF;
+    END record_result;
+
+
+    PROCEDURE assert_number(
+        p_test_name IN VARCHAR2,
+        p_expected  IN NUMBER,
+        p_actual    IN NUMBER
+    ) IS
+    BEGIN
+        record_result(
+            p_test_name,
+            p_expected = p_actual,
+            'Expected=' || NVL(TO_CHAR(p_expected), 'NULL') ||
+            ', Actual=' || NVL(TO_CHAR(p_actual), 'NULL')
+        );
+    END assert_number;
+
+
+    PROCEDURE assert_text(
+        p_test_name IN VARCHAR2,
+        p_expected  IN VARCHAR2,
+        p_actual    IN VARCHAR2
+    ) IS
+    BEGIN
+        record_result(
+            p_test_name,
+            NVL(p_expected, '#NULL#') = NVL(p_actual, '#NULL#'),
+            'Expected=' || NVL(p_expected, 'NULL') ||
+            ', Actual=' || NVL(p_actual, 'NULL')
+        );
+    END assert_text;
+
+
+    PROCEDURE assert_expected_error(
+        p_test_name     IN VARCHAR2,
+        p_expected_code IN NUMBER,
+        p_actual_code   IN NUMBER,
+        p_actual_message IN VARCHAR2
+    ) IS
+    BEGIN
+        record_result(
+            p_test_name,
+            p_expected_code = p_actual_code,
+            'Expected SQLCODE=' || p_expected_code ||
+            ', Actual SQLCODE=' || p_actual_code ||
+            ', SQLERRM=' || p_actual_message
+        );
+    END assert_expected_error;
+
+
+    ---------------------------------------------------------------------------
+    -- Cleanup autonomous error-log rows generated by expected failures
+    ---------------------------------------------------------------------------
+    PROCEDURE cleanup_test_error_logs IS
+    BEGIN
+        DELETE FROM error_logs
+        WHERE logged_at >= l_test_started_at
+          AND operation_name IN (
+              'Create Individual Customer',
+              'Create Corporate Customer',
+              'Update Customer Status',
+              'Get Customer Information'
+          )
+          AND error_code IN (
+              -20101, -20102, -20103, -20104, -20105,
+              -20111, -20112, -20113, -20114, -20115, -20116,
+              -20121, -20122, -20123, -20124,
+              -20131, -20132
+          );
+
+        COMMIT;
+    END cleanup_test_error_logs;
+
+BEGIN
+    ---------------------------------------------------------------------------
+    -- Generate test identifiers
+    ---------------------------------------------------------------------------
+    l_test_token :=
+        SUBSTR(
+            REGEXP_REPLACE(
+                TO_CHAR(SYSTIMESTAMP, 'DDHH24MISSFF6'),
+                '[^0-9]',
+                ''
+            ),
+            1,
+            14
+        );
+
+    l_national_id_1 :=
+        SUBSTR('7' || l_test_token, 1, 11);
+
+    l_national_id_2 :=
+        SUBSTR('8' || l_test_token, 1, 11);
+
+    l_tax_number_1 :=
+        SUBSTR('6' || l_test_token, 1, 10);
+
+    l_tax_number_2 :=
+        SUBSTR('5' || l_test_token, 1, 10);
+
+    l_registration_1 :=
+        'TEST-' || l_test_token || '-1';
+
+    l_registration_2 :=
+        'TEST-' || l_test_token || '-2';
+
+    SAVEPOINT suite_start;
+
+    ---------------------------------------------------------------------------
+    -- A. Package and API health
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        '--- A. PACKAGE AND API HEALTH ---'
+    );
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM user_objects
+    WHERE object_name = 'PKG_CUSTOMER_MANAGEMENT'
+      AND object_type IN ('PACKAGE', 'PACKAGE BODY')
+      AND status = 'VALID';
+
+    assert_number(
+        'Package specification and body are VALID',
+        2,
+        l_count
+    );
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM user_procedures
+    WHERE object_name = 'PKG_CUSTOMER_MANAGEMENT'
+      AND procedure_name IN (
+          'CREATE_INDIVIDUAL_CUSTOMER',
+          'CREATE_CORPORATE_CUSTOMER',
+          'UPDATE_CUSTOMER_STATUS',
+          'GET_CUSTOMER_INFO'
+      );
+
+    assert_number(
+        'Four public procedures are exposed',
+        4,
+        l_count
+    );
+
+    ---------------------------------------------------------------------------
+    -- B. Individual customer success
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        CHR(10) ||
+        '--- B. INDIVIDUAL CUSTOMER SUCCESS ---'
+    );
+
+    SAVEPOINT individual_success;
+
+    pkg_customer_management.create_individual_customer(
+        p_first_name  => '  Regression  ',
+        p_last_name   => '  Individual  ',
+        p_national_id => l_national_id_1,
+        p_birth_date  => DATE '1990-01-01',
+        p_customer_id => l_customer_id,
+        p_customer_no => l_customer_no
+    );
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM customers c
+    JOIN individual_customers ic
+      ON ic.customer_id = c.customer_id
+    WHERE c.customer_id = l_customer_id
+      AND c.customer_no = l_customer_no
+      AND c.customer_type = 'I'
+      AND c.status = 'ACTIVE'
+      AND ic.first_name = 'Regression'
+      AND ic.last_name = 'Individual'
+      AND ic.national_id = l_national_id_1;
+
+    assert_number(
+        'Individual customer is created with normalized values',
+        1,
+        l_count
+    );
+
+    record_result(
+        'Generated customer number follows CUST plus six digits',
+        REGEXP_LIKE(l_customer_no, '^CUST[0-9]{6}$'),
+        'Actual customer number=' || NVL(l_customer_no, 'NULL')
+    );
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM audit_logs
+    WHERE entity_id = TO_CHAR(l_customer_id)
+      AND action_type = 'INSERT'
+      AND operation_name = 'Create Individual Customer';
+
+    assert_number(
+        'Individual creation produces one audit row',
+        1,
+        l_count
+    );
+
+    ROLLBACK TO individual_success;
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM customers
+    WHERE customer_id = l_customer_id;
+
+    assert_number(
+        'Individual customer is removed by caller rollback',
+        0,
+        l_count
+    );
+
+    ---------------------------------------------------------------------------
+    -- C. Individual validation errors
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        CHR(10) ||
+        '--- C. INDIVIDUAL VALIDATION ERRORS ---'
+    );
+
+    BEGIN
+        pkg_customer_management.create_individual_customer(
+            p_first_name  => NULL,
+            p_last_name   => 'Test',
+            p_national_id => l_national_id_1,
+            p_birth_date  => DATE '1990-01-01',
+            p_customer_id => l_customer_id,
+            p_customer_no => l_customer_no
+        );
+
+        record_result(
+            'NULL first name is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'NULL first name raises ORA-20101',
+                -20101,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    BEGIN
+        pkg_customer_management.create_individual_customer(
+            p_first_name  => 'Test',
+            p_last_name   => NULL,
+            p_national_id => l_national_id_1,
+            p_birth_date  => DATE '1990-01-01',
+            p_customer_id => l_customer_id,
+            p_customer_no => l_customer_no
+        );
+
+        record_result(
+            'NULL last name is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'NULL last name raises ORA-20102',
+                -20102,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    BEGIN
+        pkg_customer_management.create_individual_customer(
+            p_first_name  => 'Test',
+            p_last_name   => 'Customer',
+            p_national_id => '12345ABCDEF',
+            p_birth_date  => DATE '1990-01-01',
+            p_customer_id => l_customer_id,
+            p_customer_no => l_customer_no
+        );
+
+        record_result(
+            'Invalid national ID is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Invalid national ID raises ORA-20103',
+                -20103,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    BEGIN
+        pkg_customer_management.create_individual_customer(
+            p_first_name  => 'Test',
+            p_last_name   => 'Customer',
+            p_national_id => l_national_id_1,
+            p_birth_date  => TRUNC(SYSDATE),
+            p_customer_id => l_customer_id,
+            p_customer_no => l_customer_no
+        );
+
+        record_result(
+            'Current-date birth date is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Current-date birth date raises ORA-20104',
+                -20104,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    SAVEPOINT duplicate_national_id;
+
+    pkg_customer_management.create_individual_customer(
+        p_first_name  => 'Duplicate',
+        p_last_name   => 'Base',
+        p_national_id => l_national_id_2,
+        p_birth_date  => DATE '1991-01-01',
+        p_customer_id => l_customer_id,
+        p_customer_no => l_customer_no
+    );
+
+    BEGIN
+        pkg_customer_management.create_individual_customer(
+            p_first_name  => 'Duplicate',
+            p_last_name   => 'Attempt',
+            p_national_id => l_national_id_2,
+            p_birth_date  => DATE '1992-01-01',
+            p_customer_id => l_customer_id,
+            p_customer_no => l_customer_no
+        );
+
+        record_result(
+            'Duplicate national ID is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Duplicate national ID raises ORA-20105',
+                -20105,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+    ROLLBACK TO duplicate_national_id;
+
+    ---------------------------------------------------------------------------
+    -- D. Corporate customer success
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        CHR(10) ||
+        '--- D. CORPORATE CUSTOMER SUCCESS ---'
+    );
+
+    DECLARE
+    l_sector_id sectors.sector_id%TYPE;
+    l_city_id   cities.city_id%TYPE;
+BEGIN
+    SELECT sector_id
+    INTO l_sector_id
+    FROM (
+        SELECT sector_id
+        FROM sectors
+        ORDER BY sector_id
+    )
+    WHERE ROWNUM = 1;
+
+    SELECT city_id
+    INTO l_city_id
+    FROM (
+        SELECT city_id
+        FROM cities
+        ORDER BY city_id
+    )
+    WHERE ROWNUM = 1;
+
+    INSERT INTO companies (
+        company_name,
+        sector_id,
+        city_id,
+        tax_office,
+        status,
+        created_by
+    )
+    VALUES (
+        'PKG CUSTOMER TEST ' || l_test_token,
+        l_sector_id,
+        l_city_id,
+        'TEST TAX OFFICE',
+        'ACTIVE',
+        SUBSTR(
+            SYS_CONTEXT('USERENV', 'SESSION_USER'),
+            1,
+            50
+        )
+    )
+    RETURNING
+        company_id,
+        status
+    INTO
+        l_company_id,
+        l_company_status;
+    END;
+
+    SAVEPOINT corporate_success;
+
+    pkg_customer_management.create_corporate_customer(
+        p_company_id          => l_company_id,
+        p_tax_number          => l_tax_number_1,
+        p_registration_number => LOWER(l_registration_1),
+        p_customer_id         => l_customer_id,
+        p_customer_no         => l_customer_no
+    );
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM customers c
+    JOIN corporate_customers cc
+      ON cc.customer_id = c.customer_id
+    WHERE c.customer_id = l_customer_id
+      AND c.customer_type = 'C'
+      AND c.status = 'ACTIVE'
+      AND cc.company_id = l_company_id
+      AND cc.tax_number = l_tax_number_1
+      AND cc.registration_number = UPPER(l_registration_1);
+
+    assert_number(
+        'Corporate customer is created with normalized values',
+        1,
+        l_count
+    );
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM audit_logs
+    WHERE entity_id = TO_CHAR(l_customer_id)
+      AND action_type = 'INSERT'
+      AND operation_name = 'Create Corporate Customer';
+
+    assert_number(
+        'Corporate creation produces one audit row',
+        1,
+        l_count
+    );
+
+    ---------------------------------------------------------------------------
+    -- E. Duplicate company validation
+    ---------------------------------------------------------------------------
+    BEGIN
+        pkg_customer_management.create_corporate_customer(
+            p_company_id          => l_company_id,
+            p_tax_number          => l_tax_number_2,
+            p_registration_number => l_registration_2,
+            p_customer_id         => l_customer_id,
+            p_customer_no         => l_customer_no
+        );
+
+        record_result(
+            'Duplicate company is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Duplicate company raises ORA-20116',
+                -20116,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+    ROLLBACK TO corporate_success;
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM corporate_customers
+    WHERE company_id = l_company_id;
+
+    assert_number(
+        'Corporate customer is removed by caller rollback',
+        0,
+        l_count
+    );
+
+    ---------------------------------------------------------------------------
+    -- F. Corporate validation errors
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        CHR(10) ||
+        '--- F. CORPORATE VALIDATION ERRORS ---'
+    );
+
+    BEGIN
+        pkg_customer_management.create_corporate_customer(
+            p_company_id          => NULL,
+            p_tax_number          => l_tax_number_1,
+            p_registration_number => l_registration_1,
+            p_customer_id         => l_customer_id,
+            p_customer_no         => l_customer_no
+        );
+
+        record_result(
+            'NULL company ID is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'NULL company ID raises ORA-20111',
+                -20111,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    BEGIN
+        pkg_customer_management.create_corporate_customer(
+            p_company_id          => 999999999,
+            p_tax_number          => l_tax_number_1,
+            p_registration_number => l_registration_1,
+            p_customer_id         => l_customer_id,
+            p_customer_no         => l_customer_no
+        );
+
+        record_result(
+            'Unknown company is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Unknown company raises ORA-20112',
+                -20112,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    SAVEPOINT passive_company;
+
+    UPDATE companies
+    SET status = 'PASSIVE'
+    WHERE company_id = l_company_id;
+
+    BEGIN
+        pkg_customer_management.create_corporate_customer(
+            p_company_id          => l_company_id,
+            p_tax_number          => l_tax_number_1,
+            p_registration_number => l_registration_1,
+            p_customer_id         => l_customer_id,
+            p_customer_no         => l_customer_no
+        );
+
+        record_result(
+            'Passive company is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Passive company raises ORA-20113',
+                -20113,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+    ROLLBACK TO passive_company;
+
+
+    BEGIN
+        pkg_customer_management.create_corporate_customer(
+            p_company_id          => l_company_id,
+            p_tax_number          => 'ABC123',
+            p_registration_number => l_registration_1,
+            p_customer_id         => l_customer_id,
+            p_customer_no         => l_customer_no
+        );
+
+        record_result(
+            'Invalid tax number is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Invalid tax number raises ORA-20114',
+                -20114,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    BEGIN
+        pkg_customer_management.create_corporate_customer(
+            p_company_id          => l_company_id,
+            p_tax_number          => l_tax_number_1,
+            p_registration_number => NULL,
+            p_customer_id         => l_customer_id,
+            p_customer_no         => l_customer_no
+        );
+
+        record_result(
+            'NULL registration number is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'NULL registration number raises ORA-20115',
+                -20115,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+    ---------------------------------------------------------------------------
+    -- G. Customer status management
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        CHR(10) ||
+        '--- G. CUSTOMER STATUS MANAGEMENT ---'
+    );
+
+    SAVEPOINT status_tests;
+
+    pkg_customer_management.create_individual_customer(
+        p_first_name  => 'Status',
+        p_last_name   => 'Test',
+        p_national_id => l_national_id_1,
+        p_birth_date  => DATE '1990-01-01',
+        p_customer_id => l_customer_id,
+        p_customer_no => l_customer_no
+    );
+
+    pkg_customer_management.update_customer_status(
+        p_customer_id => l_customer_id,
+        p_new_status  => ' blocked '
+    );
+
+    SELECT status
+    INTO l_customer_status
+    FROM customers
+    WHERE customer_id = l_customer_id;
+
+    assert_text(
+        'Customer status is normalized and changed to BLOCKED',
+        'BLOCKED',
+        l_customer_status
+    );
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM audit_logs
+    WHERE entity_id = TO_CHAR(l_customer_id)
+      AND action_type = 'UPDATE'
+      AND operation_name = 'Update Customer Status';
+
+    assert_number(
+        'Status change produces one UPDATE audit row',
+        1,
+        l_count
+    );
+
+
+    BEGIN
+        pkg_customer_management.update_customer_status(
+            p_customer_id => l_customer_id,
+            p_new_status  => 'BLOCKED'
+        );
+
+        record_result(
+            'Same status is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Same status raises ORA-20124',
+                -20124,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    BEGIN
+        pkg_customer_management.update_customer_status(
+            p_customer_id => NULL,
+            p_new_status  => 'ACTIVE'
+        );
+
+        record_result(
+            'NULL customer ID is rejected by status procedure',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'NULL customer ID raises ORA-20121',
+                -20121,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    BEGIN
+        pkg_customer_management.update_customer_status(
+            p_customer_id => l_customer_id,
+            p_new_status  => 'INVALID'
+        );
+
+        record_result(
+            'Invalid status is rejected',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Invalid status raises ORA-20122',
+                -20122,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    BEGIN
+        pkg_customer_management.update_customer_status(
+            p_customer_id => 999999999,
+            p_new_status  => 'BLOCKED'
+        );
+
+        record_result(
+            'Unknown customer is rejected by status procedure',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Unknown customer raises ORA-20123',
+                -20123,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+    ROLLBACK TO status_tests;
+
+    ---------------------------------------------------------------------------
+    -- H. Customer information retrieval
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        CHR(10) ||
+        '--- H. CUSTOMER INFORMATION RETRIEVAL ---'
+    );
+
+    SELECT customer_id
+    INTO l_existing_customer_id
+    FROM (
+        SELECT customer_id
+        FROM customers
+        ORDER BY customer_id
+    )
+    WHERE ROWNUM = 1;
+
+    pkg_customer_management.get_customer_info(
+        p_customer_id => l_existing_customer_id,
+        p_result      => l_result_cursor
+    );
+
+    record_result(
+        'Valid customer opens a result cursor',
+        l_result_cursor%ISOPEN,
+        'Result cursor is not open'
+    );
+
+    IF l_result_cursor%ISOPEN THEN
+        CLOSE l_result_cursor;
+    END IF;
+
+
+    BEGIN
+        pkg_customer_management.get_customer_info(
+            p_customer_id => NULL,
+            p_result      => l_result_cursor
+        );
+
+        record_result(
+            'NULL customer ID is rejected by information procedure',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'NULL customer ID raises ORA-20131',
+                -20131,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+
+    BEGIN
+        pkg_customer_management.get_customer_info(
+            p_customer_id => 999999999,
+            p_result      => l_result_cursor
+        );
+
+        record_result(
+            'Unknown customer is rejected by information procedure',
+            FALSE,
+            'No exception was raised'
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            assert_expected_error(
+                'Unknown customer raises ORA-20132',
+                -20132,
+                SQLCODE,
+                SQLERRM
+            );
+    END;
+
+    ---------------------------------------------------------------------------
+    -- I. Error-log integration
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        CHR(10) ||
+        '--- I. ERROR-LOG INTEGRATION ---'
+    );
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM error_logs
+    WHERE logged_at >= l_test_started_at
+      AND operation_name IN (
+          'Create Individual Customer',
+          'Create Corporate Customer',
+          'Update Customer Status',
+          'Get Customer Information'
+      )
+      AND error_code IN (
+          -20101, -20102, -20103, -20104, -20105,
+          -20111, -20112, -20113, -20114, -20115, -20116,
+          -20121, -20122, -20123, -20124,
+          -20131, -20132
+      );
+
+    record_result(
+        'Expected package failures are recorded in ERROR_LOGS',
+        l_count >= 16,
+        'Expected at least 16 rows, Actual=' || l_count
+    );
+
+    ---------------------------------------------------------------------------
+    -- J. Final rollback and cleanup
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        CHR(10) ||
+        '--- J. CLEANUP ---'
+    );
+
+    ROLLBACK TO suite_start;
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM customers c
+    LEFT JOIN individual_customers ic
+      ON ic.customer_id = c.customer_id
+    LEFT JOIN corporate_customers cc
+      ON cc.customer_id = c.customer_id
+    WHERE ic.national_id IN (
+              l_national_id_1,
+              l_national_id_2
+          )
+       OR cc.tax_number IN (
+              l_tax_number_1,
+              l_tax_number_2
+          );
+
+    assert_number(
+        'Business test data is removed by rollback',
+        0,
+        l_count
+    );
+
+    cleanup_test_error_logs;
+
+    SELECT COUNT(*)
+    INTO l_count
+    FROM error_logs
+    WHERE logged_at >= l_test_started_at
+      AND operation_name IN (
+          'Create Individual Customer',
+          'Create Corporate Customer',
+          'Update Customer Status',
+          'Get Customer Information'
+      )
+      AND error_code IN (
+          -20101, -20102, -20103, -20104, -20105,
+          -20111, -20112, -20113, -20114, -20115, -20116,
+          -20121, -20122, -20123, -20124,
+          -20131, -20132
+      );
+
+    assert_number(
+        'Test-generated error logs are removed',
+        0,
+        l_count
+    );
+
+    ---------------------------------------------------------------------------
+    -- Final summary
+    ---------------------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(
+        CHR(10) ||
+        '================================================================================'
+    );
+
+    DBMS_OUTPUT.PUT_LINE(
+        'PKG_CUSTOMER_MANAGEMENT TEST SUMMARY'
+    );
+
+    DBMS_OUTPUT.PUT_LINE(
+        'PASSED=' || l_pass_count ||
+        ' FAILED=' || l_fail_count ||
+        ' TOTAL=' || (l_pass_count + l_fail_count)
+    );
+
+    IF l_fail_count = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('OVERALL_STATUS=PASS');
+    ELSE
+        DBMS_OUTPUT.PUT_LINE('OVERALL_STATUS=FAIL');
+    END IF;
+
+    DBMS_OUTPUT.PUT_LINE(
+        '================================================================================'
+    );
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        ROLLBACK;
+
+        l_fail_count := l_fail_count + 1;
+
+        DBMS_OUTPUT.PUT_LINE(
+            '[FAIL] Test preparation -> Required active customer or unused active company was not found.'
+        );
+
+        BEGIN
+            cleanup_test_error_logs;
+        EXCEPTION
+            WHEN OTHERS THEN
+                NULL;
+        END;
+
+        DBMS_OUTPUT.PUT_LINE(
+            'PASSED=' || l_pass_count ||
+            ' FAILED=' || l_fail_count ||
+            ' TOTAL=' || (l_pass_count + l_fail_count)
+        );
+
+        DBMS_OUTPUT.PUT_LINE('OVERALL_STATUS=FAIL');
+
+    WHEN OTHERS THEN
+        ROLLBACK;
+
+        IF l_result_cursor%ISOPEN THEN
+            CLOSE l_result_cursor;
+        END IF;
+
+        l_fail_count := l_fail_count + 1;
+
+        DBMS_OUTPUT.PUT_LINE(
+            '[FAIL] Unexpected suite-level error -> SQLCODE=' ||
+            SQLCODE || ', SQLERRM=' || SQLERRM
+        );
+
+        DBMS_OUTPUT.PUT_LINE(
+            DBMS_UTILITY.FORMAT_ERROR_BACKTRACE
+        );
+
+        BEGIN
+            cleanup_test_error_logs;
+        EXCEPTION
+            WHEN OTHERS THEN
+                DBMS_OUTPUT.PUT_LINE(
+                    '[FAIL] Emergency error-log cleanup failed -> SQLCODE=' ||
+                    SQLCODE || ', SQLERRM=' || SQLERRM
+                );
+        END;
+
+        DBMS_OUTPUT.PUT_LINE(
+            'PASSED=' || l_pass_count ||
+            ' FAILED=' || l_fail_count ||
+            ' TOTAL=' || (l_pass_count + l_fail_count)
+        );
+
+        DBMS_OUTPUT.PUT_LINE('OVERALL_STATUS=FAIL');
+END;
+/
+
+PROMPT
+PROMPT ================================================================================
+PROMPT PACKAGE COMPILATION ERROR CHECK
+PROMPT ================================================================================
+PROMPT
+
+COLUMN name     FORMAT A35
+COLUMN type     FORMAT A20
+COLUMN line     FORMAT 999,999
+COLUMN position FORMAT 999,999
+COLUMN text     FORMAT A120
+
+SELECT
+    name,
+    type,
+    line,
+    position,
+    text
+FROM user_errors
+WHERE name IN (
+    'PKG_CUSTOMER_MANAGEMENT',
+    'PKG_AUDIT',
+    'PKG_ERROR_LOG'
+)
+ORDER BY
+    name,
+    sequence;

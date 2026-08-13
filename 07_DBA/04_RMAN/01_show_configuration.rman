@@ -1,0 +1,24 @@
+# Script  : 01_show_configuration.rman
+# Project : Oracle Banking Database - DBA Lab
+# Purpose : Reports the current RMAN configuration, target schema, and incarnation history.
+# Run As  : Oracle software owner
+# Usage   : ./run_rman_job.sh 01_show_configuration.rman
+#
+# Notes
+# -----
+# - This script does not create, modify, or delete backup files.
+# - Configuration values are read from the target database RMAN repository.
+# - The target database is accessed using operating-system authentication.
+
+SET ECHO ON;
+
+# Display the current persistent and default RMAN configuration.
+SHOW ALL;
+
+# Display the target database schema as recognized by RMAN.
+REPORT SCHEMA;
+
+# Display the database incarnation and RESETLOGS history.
+LIST INCARNATION OF DATABASE;
+
+EXIT;

@@ -1,0 +1,61 @@
+;;; 
+Export: Release 23.26.1.0.0 - Production on Sun Aug 9 19:06:19 2026
+Version 23.26.1.0.0
+
+Copyright (c) 1982, 2026, Oracle and/or its affiliates.  All rights reserved.
+;;; 
+Connected to: Oracle AI Database 26ai Enterprise Edition Release 23.26.1.0.0 - Production
+09-AUG-26 19:06:30.134: ;;; **************************************************************************
+09-AUG-26 19:06:30.141: ;;; Parfile values:
+09-AUG-26 19:06:30.145: ;;;  parfile:  tables=ACCOUNTS,ACCOUNT_TYPES,BENEFICIARIES,BRANCHES,CARDS,
+09-AUG-26 19:06:30.150: ;;;  _parfile: CARD_TYPES,CITIES,COMPANIES,CONTACT_TYPES,CORPORATE_CUSTOMERS,
+09-AUG-26 19:06:30.153: ;;;  _parfile: COUNTRIES,CURRENCIES,CUSTOMERS,CUSTOMER_ADDRESSES,
+09-AUG-26 19:06:30.157: ;;;  _parfile: CUSTOMER_CONTACTS,DISTRICTS,EXCHANGE_RATES,INDIVIDUAL_CUSTOMERS,
+09-AUG-26 19:06:30.161: ;;;  _parfile: SECTORS,TRANSACTIONS,TRANSACTION_CHANNELS,
+09-AUG-26 19:06:30.164: ;;;  _parfile: TRANSACTION_STATUS_HISTORY,TRANSACTION_TYPES
+09-AUG-26 19:06:30.169: ;;;  parfile:  metrics=Y
+09-AUG-26 19:06:30.173: ;;;  parfile:  logtime=ALL
+09-AUG-26 19:06:30.177: ;;;  parfile:  filesize=1G
+09-AUG-26 19:06:30.181: ;;;  parfile:  parallel=2
+09-AUG-26 19:06:30.185: ;;;  parfile:  flashback_time=systimestamp
+09-AUG-26 19:06:30.190: ;;;  parfile:  content=DATA_ONLY
+09-AUG-26 19:06:30.194: ;;;  parfile:  logfile=banking_data_export.log
+09-AUG-26 19:06:30.199: ;;;  parfile:  dumpfile=banking_data_%U.dmp
+09-AUG-26 19:06:30.203: ;;;  parfile:  directory=DATA_PUMP_DIR
+09-AUG-26 19:06:30.206: ;;; **************************************************************************
+09-AUG-26 19:06:31.132: Starting "BANKING_DB"."SYS_EXPORT_TABLE_01":  BANKING_DB/********@ORCLPDB1 parfile=/tmp/03_Export_All_Table_Data.par 
+09-AUG-26 19:06:31.653: W-1 Startup on instance 1 took 0 seconds
+09-AUG-26 19:06:32.291: W-2 Startup on instance 1 took 0 seconds
+09-AUG-26 19:06:32.648: W-2 Processing object type TABLE_EXPORT/TABLE/IDENTITY_COLUMN
+09-AUG-26 19:06:32.712: W-2      Completed 21 IDENTITY_COLUMN objects in 0 seconds
+09-AUG-26 19:06:33.203: W-1 Processing object type TABLE_EXPORT/TABLE/TABLE_DATA
+09-AUG-26 19:06:33.562: W-1 . . exported "BANKING_DB"."ACCOUNTS"                         2 MB   21000 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.587: W-2 . . exported "BANKING_DB"."TRANSACTIONS"                  17.2 MB  200000 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.608: W-1 . . exported "BANKING_DB"."CUSTOMER_CONTACTS"              1.5 MB   22850 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.650: W-1 . . exported "BANKING_DB"."CUSTOMER_ADDRESSES"             1.6 MB   14293 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.683: W-1 . . exported "BANKING_DB"."BENEFICIARIES"                656.3 KB   15644 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.716: W-1 . . exported "BANKING_DB"."CARDS"                        559.5 KB    7866 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.755: W-1 . . exported "BANKING_DB"."INDIVIDUAL_CUSTOMERS"         583.9 KB    9002 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.786: W-1 . . exported "BANKING_DB"."CUSTOMERS"                    477.1 KB   10003 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.815: W-1 . . exported "BANKING_DB"."COMPANIES"                     87.5 KB    1001 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.843: W-1 . . exported "BANKING_DB"."CORPORATE_CUSTOMERS"             60 KB    1001 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.879: W-1 . . exported "BANKING_DB"."DISTRICTS"                       25 KB     973 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.909: W-1 . . exported "BANKING_DB"."BRANCHES"                      16.6 KB      50 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.939: W-1 . . exported "BANKING_DB"."EXCHANGE_RATES"                 9.6 KB       7 rows in 0 seconds using direct_path
+09-AUG-26 19:06:33.968: W-1 . . exported "BANKING_DB"."SECTORS"                        7.9 KB      14 rows in 0 seconds using direct_path
+09-AUG-26 19:06:34.002: W-1 . . exported "BANKING_DB"."CITIES"                         7.4 KB      81 rows in 0 seconds using direct_path
+09-AUG-26 19:06:34.032: W-1 . . exported "BANKING_DB"."CURRENCIES"                     6.6 KB       8 rows in 1 seconds using direct_path
+09-AUG-26 19:06:34.060: W-1 . . exported "BANKING_DB"."TRANSACTION_TYPES"              6.3 KB       6 rows in 0 seconds using direct_path
+09-AUG-26 19:06:34.091: W-1 . . exported "BANKING_DB"."CARD_TYPES"                     6.3 KB       5 rows in 0 seconds using direct_path
+09-AUG-26 19:06:34.122: W-1 . . exported "BANKING_DB"."TRANSACTION_CHANNELS"           6.2 KB       5 rows in 0 seconds using direct_path
+09-AUG-26 19:06:34.155: W-1 . . exported "BANKING_DB"."COUNTRIES"                      6.2 KB       8 rows in 0 seconds using direct_path
+09-AUG-26 19:06:34.182: W-1 . . exported "BANKING_DB"."ACCOUNT_TYPES"                  6.2 KB       5 rows in 0 seconds using direct_path
+09-AUG-26 19:06:34.206: W-1 . . exported "BANKING_DB"."CONTACT_TYPES"                  6.2 KB       5 rows in 0 seconds using direct_path
+09-AUG-26 19:06:34.241: W-1 . . exported "BANKING_DB"."TRANSACTION_STATUS_HISTORY"     7.8 KB       0 rows in 0 seconds using direct_path
+09-AUG-26 19:06:35.275: W-2      Completed 23 TABLE_EXPORT/TABLE/TABLE_DATA objects in 1 seconds
+09-AUG-26 19:06:35.466: W-2 Master table "BANKING_DB"."SYS_EXPORT_TABLE_01" successfully loaded/unloaded
+09-AUG-26 19:06:35.531: ******************************************************************************
+09-AUG-26 19:06:35.532: Dump file set for BANKING_DB.SYS_EXPORT_TABLE_01 is:
+09-AUG-26 19:06:35.532:   /opt/oracle/admin/ORCLCDB/dpdump/5568D25A59CF0DCCE063030011AC2144/banking_data_01.dmp
+09-AUG-26 19:06:35.532:   /opt/oracle/admin/ORCLCDB/dpdump/5568D25A59CF0DCCE063030011AC2144/banking_data_02.dmp
+09-AUG-26 19:06:35.547: Job "BANKING_DB"."SYS_EXPORT_TABLE_01" successfully completed at Sun Aug 9 19:06:35 2026 elapsed 0 00:00:06

@@ -1,0 +1,28 @@
+# Script  : 04_incremental_level1_backup.rman
+# Project : Oracle Banking Database - DBA Lab
+# Purpose : Creates a compressed differential incremental level 1 database backup.
+# Run As  : Oracle software owner
+# Usage   : ./run_rman_job.sh 04_incremental_level1_backup.rman
+#
+# Notes
+# -----
+# - A usable level 0 backup should exist before this job is scheduled.
+# - This is a differential level 1 backup, not a cumulative level 1 backup.
+# - The backup destination must exist and be writable by the Oracle software owner.
+
+SET ECHO ON;
+
+RUN {
+    # Create a differential level 1 backup containing blocks changed
+    # since the most recent level 0 or level 1 incremental backup.
+    BACKUP AS COMPRESSED BACKUPSET
+        INCREMENTAL LEVEL 1
+        DATABASE
+        FORMAT '/home/oracle/rman_yedek/incr_lvl1_%d_%T_%U.bkp'
+        TAG 'INCREMENTAL_LEVEL1_BACKUP';
+}
+
+# Display all backup records associated with this tag.
+LIST BACKUP SUMMARY TAG 'INCREMENTAL_LEVEL1_BACKUP';
+
+EXIT;

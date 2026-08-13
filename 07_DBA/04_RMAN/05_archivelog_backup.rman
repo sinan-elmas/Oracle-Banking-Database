@@ -1,0 +1,32 @@
+# Script  : 05_archivelog_backup.rman
+# Project : Oracle Banking Database - DBA Lab
+# Purpose : Creates a compressed backup of archived redo logs not yet backed up once.
+# Run As  : Oracle software owner
+# Usage   : ./run_rman_job.sh 05_archivelog_backup.rman
+#
+# Notes
+# -----
+# - This script forces a log switch before starting the backup.
+# - Source archived redo logs are retained after backup.
+# - The database must be in ARCHIVELOG mode.
+# - The backup destination must exist and be writable by the Oracle software owner.
+
+SET ECHO ON;
+
+RUN {
+    # Archive the current online redo log before starting the backup.
+    SQL 'ALTER SYSTEM ARCHIVE LOG CURRENT';
+
+    # Back up archived redo logs not yet backed up at least once.
+    # Source archived redo logs are intentionally retained.
+    BACKUP AS COMPRESSED BACKUPSET
+        ARCHIVELOG ALL
+        NOT BACKED UP 1 TIMES
+        FORMAT '/home/oracle/rman_yedek/archivelog_%d_%T_%U.bkp'
+        TAG 'ARCHIVELOG_BACKUP';
+}
+
+# Display all backup records associated with this tag.
+LIST BACKUP SUMMARY TAG 'ARCHIVELOG_BACKUP';
+
+EXIT;

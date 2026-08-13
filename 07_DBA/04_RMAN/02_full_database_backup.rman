@@ -1,0 +1,27 @@
+# Script  : 02_full_database_backup.rman
+# Project : Oracle Banking Database - DBA Lab
+# Purpose : Creates a compressed online full backup of all database datafiles.
+# Run As  : Oracle software owner
+# Usage   : ./run_rman_job.sh 02_full_database_backup.rman
+#
+# Notes
+# -----
+# - This script creates physical RMAN backup pieces.
+# - The database must be in ARCHIVELOG mode for an online backup.
+# - The backup destination must exist and be writable by the Oracle software owner.
+# - Archived redo logs are backed up separately by 05_archivelog_backup.rman.
+
+SET ECHO ON;
+
+RUN {
+    # Create a compressed full backupset of all database datafiles.
+    BACKUP AS COMPRESSED BACKUPSET
+        DATABASE
+        FORMAT '/home/oracle/rman_yedek/full_db_%d_%T_%U.bkp'
+        TAG 'FULL_DATABASE_BACKUP';
+}
+
+# Display all backup records associated with this tag.
+LIST BACKUP SUMMARY TAG 'FULL_DATABASE_BACKUP';
+
+EXIT;

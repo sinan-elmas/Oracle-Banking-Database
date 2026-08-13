@@ -1,0 +1,27 @@
+# Script  : 03_incremental_level0_backup.rman
+# Project : Oracle Banking Database - DBA Lab
+# Purpose : Creates a compressed incremental level 0 database backup.
+# Run As  : Oracle software owner
+# Usage   : ./run_rman_job.sh 03_incremental_level0_backup.rman
+#
+# Notes
+# -----
+# - This script creates the baseline for subsequent incremental level 1 backups.
+# - The backup destination must exist and be writable by the Oracle software owner.
+# - Archived redo logs are backed up separately by 05_archivelog_backup.rman.
+
+SET ECHO ON;
+
+RUN {
+    # Create the baseline incremental backup.
+    BACKUP AS COMPRESSED BACKUPSET
+        INCREMENTAL LEVEL 0
+        DATABASE
+        FORMAT '/home/oracle/rman_yedek/incr_lvl0_%d_%T_%U.bkp'
+        TAG 'INCREMENTAL_LEVEL0_BACKUP';
+}
+
+# Display all backup records associated with this tag.
+LIST BACKUP SUMMARY TAG 'INCREMENTAL_LEVEL0_BACKUP';
+
+EXIT;

@@ -1,0 +1,23 @@
+# Script  : 07_validate_database.rman
+# Project : Oracle Banking Database - DBA Lab
+# Purpose : Validates database blocks and verifies the availability of required backups.
+# Run As  : Oracle software owner
+# Usage   : ./run_rman_job.sh 07_validate_database.rman
+#
+# Notes
+# -----
+# - This script does not create backup pieces or restore database files.
+# - VALIDATE DATABASE reads database blocks and may generate significant I/O.
+# - RESTORE DATABASE VALIDATE reads the backup pieces required for a restore.
+# - Schedule validation outside peak workload periods when possible.
+
+SET ECHO ON;
+
+# Validate all database datafile blocks without creating a backup.
+VALIDATE DATABASE;
+
+# Verify that the backups required to restore the database are available
+# and readable without performing an actual restore.
+RESTORE DATABASE VALIDATE;
+
+EXIT;

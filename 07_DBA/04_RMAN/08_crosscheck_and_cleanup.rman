@@ -1,0 +1,35 @@
+# Script  : 08_crosscheck_and_cleanup.rman
+# Project : Oracle Banking Database - DBA Lab
+# Purpose : Crosschecks RMAN records and deletes expired records and obsolete backups.
+# Run As  : Oracle software owner
+# Usage   : ./run_rman_job.sh 08_crosscheck_and_cleanup.rman
+#
+# Warning
+# -------
+# - This script changes RMAN repository status information.
+# - DELETE EXPIRED removes repository records for files that RMAN cannot locate.
+# - DELETE OBSOLETE permanently deletes backup files and repository records
+#   according to the configured retention policy.
+# - Review the active retention policy and REPORT OBSOLETE output before execution.
+
+SET ECHO ON;
+
+# Synchronize RMAN metadata with physical backup files.
+CROSSCHECK BACKUP;
+CROSSCHECK ARCHIVELOG ALL;
+
+# Display obsolete backups according to the current retention policy.
+REPORT OBSOLETE;
+
+# Remove expired repository records.
+DELETE NOPROMPT EXPIRED BACKUP;
+DELETE NOPROMPT EXPIRED ARCHIVELOG ALL;
+
+# Permanently delete obsolete physical backup files and their repository records
+# according to the configured retention policy.
+DELETE NOPROMPT OBSOLETE;
+
+# Display remaining obsolete backups, if any.
+REPORT OBSOLETE;
+
+EXIT;

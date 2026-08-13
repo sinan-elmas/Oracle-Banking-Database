@@ -1,0 +1,34 @@
+# Script  : 06_controlfile_spfile_backup.rman
+# Project : Oracle Banking Database - DBA Lab
+# Purpose : Creates explicit backups of the current control file and server parameter file.
+# Run As  : Oracle software owner
+# Usage   : ./run_rman_job.sh 06_controlfile_spfile_backup.rman
+#
+# Notes
+# -----
+# - This script creates physical RMAN backup pieces.
+# - The target database must be using an SPFILE for the SPFILE backup to succeed.
+# - Explicit backups complement, but do not replace, control file autobackup.
+# - The backup destination must exist and be writable by the Oracle software owner.
+
+SET ECHO ON;
+
+RUN {
+    # Create an explicit compressed backup of the current control file.
+    BACKUP AS COMPRESSED BACKUPSET
+        CURRENT CONTROLFILE
+        FORMAT '/home/oracle/rman_yedek/controlfile_%d_%T_%U.bkp'
+        TAG 'CONTROLFILE_BACKUP';
+
+    # Create an explicit compressed backup of the server parameter file.
+    BACKUP AS COMPRESSED BACKUPSET
+        SPFILE
+        FORMAT '/home/oracle/rman_yedek/spfile_%d_%T_%U.bkp'
+        TAG 'SPFILE_BACKUP';
+}
+
+# Display all backup records associated with these tags.
+LIST BACKUP SUMMARY TAG 'CONTROLFILE_BACKUP';
+LIST BACKUP SUMMARY TAG 'SPFILE_BACKUP';
+
+EXIT;

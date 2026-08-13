@@ -1,0 +1,391 @@
+// Oracle Banking Database
+// Generated from the verified DDL in 01_Database_Design
+// Inventory: 26 tables, 26 PKs, 26 UQs, 28 FKs
+// The two customer subtype FKs preserve ON DELETE CASCADE.
+
+Table countries {
+  country_id number [pk, not null, increment]
+  country_name "VARCHAR2" [not null, unique]
+  country_code "CHAR" [not null, unique]
+}
+
+Table cities {
+  city_id number [pk, not null, increment]
+  country_id number [not null]
+  city_name "VARCHAR2" [not null]
+
+  indexes {
+    (country_id, city_name) [unique, name: 'uq_city_country']
+  }
+}
+
+Table districts {
+  district_id number [pk, not null, increment]
+  city_id number [not null]
+  district_name "VARCHAR2" [not null]
+
+  indexes {
+    (city_id, district_name) [unique, name: 'uq_district_city']
+  }
+}
+
+Table sectors {
+  sector_id number [pk, not null, increment]
+  sector_name "VARCHAR2" [not null, unique]
+  created_at timestamp [not null]
+  created_by "VARCHAR2" [not null]
+  updated_at timestamp
+  updated_by "VARCHAR2"
+}
+
+Table currencies {
+  currency_id number [pk, not null, increment]
+  currency_code "CHAR" [not null, unique]
+  currency_name "VARCHAR2" [not null]
+  symbol "VARCHAR2"
+}
+
+Table account_types {
+  account_type_id number [pk, not null, increment]
+  type_name "VARCHAR2" [not null, unique]
+  description "VARCHAR2"
+}
+
+Table card_types {
+  card_type_id number [pk, not null, increment]
+  type_name "VARCHAR2" [not null, unique]
+  description "VARCHAR2"
+}
+
+Table contact_types {
+  contact_type_id number [pk, not null, increment]
+  type_name "VARCHAR2" [not null, unique]
+  description "VARCHAR2"
+}
+
+Table transaction_channels {
+  channel_id number [pk, not null, increment]
+  channel_name "VARCHAR2" [not null, unique]
+  description "VARCHAR2"
+}
+
+Table transaction_types {
+  transaction_type_id number [pk, not null, increment]
+  type_name "VARCHAR2" [not null, unique]
+  description "VARCHAR2"
+}
+
+Table companies {
+  company_id number [pk, not null, increment]
+  company_name "VARCHAR2" [not null, unique]
+  sector_id number [not null]
+  city_id number [not null]
+  tax_office "VARCHAR2" [not null]
+  status "VARCHAR2" [not null]
+  created_at timestamp [not null]
+  created_by "VARCHAR2" [not null]
+  updated_at timestamp
+  updated_by "VARCHAR2"
+}
+
+Table customers {
+  customer_id number [pk, not null, increment]
+  customer_no "VARCHAR2" [not null, unique]
+  customer_type "CHAR" [not null]
+  status "VARCHAR2" [not null]
+  created_at timestamp [not null]
+  created_by "VARCHAR2" [not null]
+  updated_at timestamp
+  updated_by "VARCHAR2"
+}
+
+Table individual_customers {
+  customer_id number [pk, not null]
+  first_name "VARCHAR2" [not null]
+  last_name "VARCHAR2" [not null]
+  national_id "CHAR" [not null, unique]
+  birth_date date
+  created_at timestamp [not null]
+  created_by "VARCHAR2" [not null]
+  updated_at timestamp
+  updated_by "VARCHAR2"
+}
+
+Table corporate_customers {
+  customer_id number [pk, not null]
+  company_id number [not null, unique]
+  tax_number "VARCHAR2" [not null, unique]
+  registration_number "VARCHAR2" [not null, unique]
+  created_at timestamp [not null]
+  created_by "VARCHAR2" [not null]
+  updated_at timestamp
+  updated_by "VARCHAR2"
+}
+
+Table customer_addresses {
+  address_id number [pk, not null, increment]
+  customer_id number [not null]
+  district_id number [not null]
+  address_line "VARCHAR2" [not null]
+  postal_code "VARCHAR2"
+  address_type "VARCHAR2" [not null]
+  created_at timestamp [not null]
+  created_by "VARCHAR2" [not null]
+  updated_at timestamp
+  updated_by "VARCHAR2"
+
+  indexes {
+    (customer_id, address_type) [unique, name: 'uq_customer_address_type']
+  }
+}
+
+Table customer_contacts {
+  contact_id number [pk, not null, increment]
+  customer_id number [not null]
+  contact_type_id number [not null]
+  contact_value "VARCHAR2" [not null]
+  is_primary "CHAR" [not null]
+  priority_rank number
+  is_verified "CHAR" [not null]
+  source_channel "VARCHAR2"
+  created_at timestamp [not null]
+  updated_at timestamp
+  created_by "VARCHAR2" [not null]
+  updated_by "VARCHAR2"
+
+  indexes {
+    (customer_id, contact_value, contact_type_id) [unique, name: 'uq_cc']
+  }
+}
+
+Table branches {
+  branch_id number [pk, not null, increment]
+  branch_name "VARCHAR2" [not null]
+  branch_code "VARCHAR2" [not null, unique]
+  city_id number [not null]
+  phone "VARCHAR2"
+  address "VARCHAR2"
+  opening_date date
+  status "VARCHAR2" [not null]
+  created_at date [not null]
+  created_by "VARCHAR2" [not null]
+  updated_at date
+  updated_by "VARCHAR2"
+}
+
+Table accounts {
+  account_id number [pk, not null, increment]
+  customer_id number [not null]
+  branch_id number [not null]
+  account_type_id number [not null]
+  currency_id number [not null]
+  account_number "VARCHAR2" [not null, unique]
+  iban "VARCHAR2" [not null, unique]
+  balance number
+  status "VARCHAR2" [not null]
+  opening_date date [not null]
+  closing_date date
+  created_at timestamp [not null]
+  created_by "VARCHAR2"
+  updated_at timestamp
+  updated_by "VARCHAR2"
+}
+
+Table beneficiaries {
+  beneficiary_id number [pk, not null, increment]
+  customer_id number [not null]
+  beneficiary_account_id number [not null]
+  nickname "VARCHAR2"
+  created_at timestamp [not null]
+  created_by "VARCHAR2" [not null]
+  updated_at timestamp
+  updated_by "VARCHAR2"
+
+  indexes {
+    (customer_id, beneficiary_account_id) [unique, name: 'uq_benef_customer_account']
+  }
+}
+
+Table cards {
+  card_id number [pk, not null, increment]
+  account_id number [not null]
+  card_type_id number [not null]
+  card_number "VARCHAR2" [not null, unique]
+  expiry_date date [not null]
+  status "VARCHAR2" [not null]
+  created_at timestamp [not null]
+  created_by "VARCHAR2"
+  updated_at timestamp
+  updated_by "VARCHAR2"
+}
+
+Table exchange_rates {
+  rate_id number [pk, not null, increment]
+  currency_id number [not null]
+  base_currency_id number [not null]
+  buy_rate number [not null]
+  sell_rate number [not null]
+  rate_date date [not null]
+  created_at date [not null]
+  created_by "VARCHAR2" [not null]
+  updated_at date
+  updated_by "VARCHAR2"
+
+  indexes {
+    (currency_id, base_currency_id, rate_date) [unique, name: 'uq_exchange_rate']
+  }
+}
+
+Table transactions {
+  transaction_id number [pk, not null, increment]
+  source_account_id number [not null]
+  target_account_id number
+  transaction_type_id number [not null]
+  channel_id number [not null]
+  currency_id number [not null]
+  amount number [not null]
+  transaction_date timestamp [not null]
+  description "VARCHAR2"
+  reference_number "VARCHAR2" [not null, unique]
+  status "VARCHAR2" [not null]
+}
+
+Table transaction_status_history {
+  history_id number [pk, not null, increment]
+  transaction_id number [not null]
+  old_status "VARCHAR2"
+  new_status "VARCHAR2" [not null]
+  changed_at timestamp [not null]
+  changed_by "VARCHAR2" [not null]
+  change_group_id "VARCHAR2" [not null]
+}
+
+Table audit_logs {
+  audit_log_id number [pk, not null, increment]
+  logged_at timestamp [not null]
+  action_type "VARCHAR2" [not null]
+  entity_name "VARCHAR2" [not null]
+  entity_id "VARCHAR2"
+  module_name "VARCHAR2"
+  procedure_name "VARCHAR2"
+  operation_name "VARCHAR2"
+  old_data text
+  new_data text
+  context_data text
+  session_user "VARCHAR2" [not null]
+  client_identifier "VARCHAR2"
+  host_name "VARCHAR2"
+  os_user "VARCHAR2"
+  session_id number
+  transaction_id "VARCHAR2"
+}
+
+Table error_logs {
+  error_log_id number [pk, not null, increment]
+  logged_at timestamp [not null]
+  severity "VARCHAR2" [not null]
+  error_code number
+  error_message "VARCHAR2"
+  error_stack text
+  error_backtrace text
+  call_stack text
+  module_name "VARCHAR2"
+  procedure_name "VARCHAR2"
+  operation_name "VARCHAR2"
+  entity_name "VARCHAR2"
+  entity_id "VARCHAR2"
+  context_data text
+  session_user "VARCHAR2" [not null]
+  client_identifier "VARCHAR2"
+  host_name "VARCHAR2"
+  os_user "VARCHAR2"
+  session_id number
+  transaction_id "VARCHAR2"
+}
+
+Table ddl_audit_logs {
+  ddl_audit_id number [pk, not null, increment]
+  event_type "VARCHAR2" [not null]
+  object_owner "VARCHAR2"
+  object_name "VARCHAR2"
+  object_type "VARCHAR2"
+  login_user "VARCHAR2" [not null]
+  session_user "VARCHAR2"
+  current_schema "VARCHAR2"
+  os_user "VARCHAR2"
+  host_name "VARCHAR2"
+  ip_address "VARCHAR2"
+  module_name "VARCHAR2"
+  event_timestamp timestamp [not null]
+  sql_text text
+}
+
+TableGroup Reference_Data {
+  countries
+  cities
+  districts
+  sectors
+  currencies
+  account_types
+  card_types
+  contact_types
+  transaction_channels
+  transaction_types
+}
+
+TableGroup Customer_Domain {
+  companies
+  customers
+  individual_customers
+  corporate_customers
+  customer_addresses
+  customer_contacts
+}
+
+TableGroup Account_Card_Domain {
+  branches
+  accounts
+  beneficiaries
+  cards
+  exchange_rates
+}
+
+TableGroup Transaction_Domain {
+  transactions
+  transaction_status_history
+}
+
+TableGroup Audit_Logging_Domain {
+  audit_logs
+  error_logs
+  ddl_audit_logs
+}
+
+Ref fk_acc_branch: accounts.branch_id > branches.branch_id
+Ref fk_acc_currency: accounts.currency_id > currencies.currency_id
+Ref fk_acc_customer: accounts.customer_id > customers.customer_id
+Ref fk_acc_type: accounts.account_type_id > account_types.account_type_id
+Ref fk_benef_account: beneficiaries.beneficiary_account_id > accounts.account_id
+Ref fk_benef_customer: beneficiaries.customer_id > customers.customer_id
+Ref fk_branches_city: branches.city_id > cities.city_id
+Ref fk_card_account: cards.account_id > accounts.account_id
+Ref fk_card_type: cards.card_type_id > card_types.card_type_id
+Ref fk_cities_country: cities.country_id > countries.country_id
+Ref fk_company_city: companies.city_id > cities.city_id
+Ref fk_company_sector: companies.sector_id > sectors.sector_id
+Ref fk_corporate_company: corporate_customers.company_id > companies.company_id
+Ref fk_corporate_customer: corporate_customers.customer_id - customers.customer_id [delete: cascade]
+Ref fk_addr_customer: customer_addresses.customer_id > customers.customer_id
+Ref fk_addr_district: customer_addresses.district_id > districts.district_id
+Ref fk_cc_customer: customer_contacts.customer_id > customers.customer_id
+Ref fk_cc_type: customer_contacts.contact_type_id > contact_types.contact_type_id
+Ref fk_districts_city: districts.city_id > cities.city_id
+Ref fk_rates_base_currency: exchange_rates.base_currency_id > currencies.currency_id
+Ref fk_rates_currency: exchange_rates.currency_id > currencies.currency_id
+Ref fk_individual_customer: individual_customers.customer_id - customers.customer_id [delete: cascade]
+Ref fk_tr_channel: transactions.channel_id > transaction_channels.channel_id
+Ref fk_tr_currency: transactions.currency_id > currencies.currency_id
+Ref fk_tr_source: transactions.source_account_id > accounts.account_id
+Ref fk_tr_target: transactions.target_account_id > accounts.account_id
+Ref fk_tr_type: transactions.transaction_type_id > transaction_types.transaction_type_id
+Ref fk_trx_status_hist_transaction: transaction_status_history.transaction_id > transactions.transaction_id

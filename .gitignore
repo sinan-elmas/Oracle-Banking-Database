@@ -1,0 +1,45 @@
+# =============================================================================
+# Oracle Banking Database
+# Git Ignore Rules
+# =============================================================================
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary and backup files
+*.tmp
+*.temp
+*.bak
+*.old
+*~
+~$*
+
+# Environment and secret files
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Local Oracle / SQL Developer settings
+.system*/
+sqldeveloper/
+
+# Local runtime directories
+logs/
+tmp/
+temp/
+
+# Python cache files, if local helper scripts are ever used
+__pycache__/
+*.pyc
