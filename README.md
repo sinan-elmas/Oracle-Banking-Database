@@ -252,4 +252,4 @@ For the consolidated project view, see:
 Oracle Database and DBA-focused portfolio project developed as a hands-on study of database design, SQL, PL/SQL, performance analysis, testing, data migration, backup and recovery, monitoring, and Oracle database administration.
 
 - **LinkedIn:** [linkedin.com/in/sinan-elmas](https://www.linkedin.com/in/sinan-elmas)
-- **GitHub:** [github.com/sinanelmas](https://github.com/sinanelmas)
+- **GitHub:** [github.com/sinan-elmas](https://github.com/sinan-elmas)
