@@ -72,7 +72,7 @@ create or replace PACKAGE BODY pkg_audit AS
                 l_caller_path,
                 '[^.]+',
                 1,
-                2
+                1
             );
 
         l_procedure_name :=
@@ -80,7 +80,7 @@ create or replace PACKAGE BODY pkg_audit AS
                 l_caller_path,
                 '[^.]+',
                 1,
-                3
+                2
             );
 
         l_transaction_id :=
