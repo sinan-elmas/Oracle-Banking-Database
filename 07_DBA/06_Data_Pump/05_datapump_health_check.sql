@@ -9,6 +9,12 @@
   -----
   - This script is read-only.
   - It checks common Data Pump configuration and operational issues.
+  - EXPDP_DIR is the project Data Pump directory.
+  - BANKING_DB is the project schema used for Data Pump operations.
+  - Directory readiness verifies the Oracle DIRECTORY object and
+    BANKING_DB READ/WRITE object privileges.
+  - Filesystem directory existence and operating system permissions
+    are not validated by this SQL script.
   - No Data Pump job is modified.
 */
 
@@ -43,6 +49,31 @@ WITH directory_state AS (
     FROM
         dba_directories
 ),
+project_privilege_state AS (
+    SELECT
+        SUM(
+            CASE
+                WHEN table_name = 'EXPDP_DIR'
+                 AND grantee = 'BANKING_DB'
+                 AND privilege = 'READ'
+                THEN 1
+                ELSE 0
+            END
+        ) AS banking_db_read_count,
+        SUM(
+            CASE
+                WHEN table_name = 'EXPDP_DIR'
+                 AND grantee = 'BANKING_DB'
+                 AND privilege = 'WRITE'
+                THEN 1
+                ELSE 0
+            END
+        ) AS banking_db_write_count
+    FROM
+        dba_tab_privs
+    WHERE
+        type = 'DIRECTORY'
+),
 privilege_state AS (
     SELECT
         COUNT(*) AS directory_privilege_count,
@@ -60,16 +91,21 @@ SELECT
     ds.directory_count,
     NVL(ds.default_directory_count, 0) AS default_directory_count,
     NVL(ds.custom_directory_count, 0) AS custom_directory_count,
+    NVL(pps.banking_db_read_count, 0) AS banking_db_read_count,
+    NVL(pps.banking_db_write_count, 0) AS banking_db_write_count,
     ps.directory_privilege_count,
     ps.privileged_grantee_count,
     CASE
-        WHEN NVL(ds.default_directory_count, 0) > 0
-          OR NVL(ds.custom_directory_count, 0) > 0
-        THEN 'AVAILABLE'
-        ELSE 'NOT CONFIGURED'
+        WHEN NVL(ds.custom_directory_count, 0) = 0
+        THEN 'EXPDP_DIR NOT CONFIGURED'
+        WHEN NVL(pps.banking_db_read_count, 0) = 0
+          OR NVL(pps.banking_db_write_count, 0) = 0
+        THEN 'PRIVILEGE REVIEW REQUIRED'
+        ELSE 'READY'
     END AS directory_readiness
 FROM
     directory_state ds
+    CROSS JOIN project_privilege_state pps
     CROSS JOIN privilege_state ps;
 
 PROMPT
@@ -90,7 +126,12 @@ WITH active_jobs AS (
         NVL(
             SUM(
                 CASE
-                    WHEN state IN ('DEFINING', 'IDLING', 'STOP PENDING', 'STOPPING')
+                    WHEN state IN (
+                        'DEFINING',
+                        'IDLING',
+                        'STOP PENDING',
+                        'STOPPING'
+                    )
                     THEN 1
                     ELSE 0
                 END
@@ -211,14 +252,38 @@ PROMPT Data Pump Health Summary
 
 WITH directory_state AS (
     SELECT
-        SUM(
-            CASE
-                WHEN directory_name IN ('DATA_PUMP_DIR', 'EXPDP_DIR') THEN 1
-                ELSE 0
-            END
-        ) AS usable_directory_count
+        COUNT(*) AS expdp_dir_count
     FROM
         dba_directories
+    WHERE
+        directory_name = 'EXPDP_DIR'
+),
+privilege_state AS (
+    SELECT
+        NVL(
+            SUM(
+                CASE
+                    WHEN privilege = 'READ' THEN 1
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS read_privilege_count,
+        NVL(
+            SUM(
+                CASE
+                    WHEN privilege = 'WRITE' THEN 1
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS write_privilege_count
+    FROM
+        dba_tab_privs
+    WHERE
+        type = 'DIRECTORY'
+        AND table_name = 'EXPDP_DIR'
+        AND grantee = 'BANKING_DB'
 ),
 active_job_state AS (
     SELECT
@@ -233,6 +298,26 @@ active_session_state AS (
         COUNT(*) AS active_session_count
     FROM
         dba_datapump_sessions
+),
+master_table_state AS (
+    SELECT
+        COUNT(*) AS master_table_count
+    FROM
+        dba_objects
+    WHERE
+        object_type = 'TABLE'
+        AND (
+               object_name LIKE 'SYS\_EXPORT\_%' ESCAPE '\'
+            OR object_name LIKE 'SYS\_IMPORT\_%' ESCAPE '\'
+        )
+),
+external_table_state AS (
+    SELECT
+        COUNT(*) AS external_table_count
+    FROM
+        dba_external_tables
+    WHERE
+        UPPER(type_name) = 'ORACLE_DATAPUMP'
 ),
 object_state AS (
     SELECT
@@ -271,9 +356,12 @@ capacity_state AS (
 )
 SELECT
     CASE
-        WHEN NVL(ds.usable_directory_count, 0) > 0
-        THEN 'AVAILABLE'
-        ELSE 'NOT CONFIGURED'
+        WHEN ds.expdp_dir_count = 0
+        THEN 'EXPDP_DIR NOT CONFIGURED'
+        WHEN ps.read_privilege_count = 0
+          OR ps.write_privilege_count = 0
+        THEN 'PRIVILEGE REVIEW REQUIRED'
+        ELSE 'READY'
     END AS directory_state,
     CASE
         WHEN ajs.active_job_count = 0
@@ -282,13 +370,19 @@ SELECT
         ELSE 'ACTIVE JOB DETECTED'
     END AS job_state,
     CASE
-        WHEN os.invalid_datapump_object_count = 0
-        THEN 'HEALTHY'
-        ELSE 'REVIEW REQUIRED'
+        WHEN os.invalid_datapump_object_count > 0
+        THEN 'REVIEW REQUIRED'
+        WHEN mts.master_table_count = 0
+         AND ets.external_table_count = 0
+        THEN 'NO DATAPUMP OBJECTS'
+        ELSE 'HEALTHY'
     END AS object_state,
     cs.parallel_max_servers,
     CASE
-        WHEN NVL(ds.usable_directory_count, 0) = 0
+        WHEN ds.expdp_dir_count = 0
+        THEN 'NOT READY'
+        WHEN ps.read_privilege_count = 0
+          OR ps.write_privilege_count = 0
         THEN 'NOT READY'
         WHEN os.invalid_datapump_object_count > 0
         THEN 'REVIEW REQUIRED'
@@ -296,8 +390,11 @@ SELECT
     END AS datapump_environment_state
 FROM
     directory_state ds
+    CROSS JOIN privilege_state ps
     CROSS JOIN active_job_state ajs
     CROSS JOIN active_session_state ass
+    CROSS JOIN master_table_state mts
+    CROSS JOIN external_table_state ets
     CROSS JOIN object_state os
     CROSS JOIN capacity_state cs;
 
