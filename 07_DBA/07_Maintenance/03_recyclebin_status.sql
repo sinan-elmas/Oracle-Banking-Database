@@ -161,7 +161,7 @@ WITH application_recyclebin AS (
                 END
             ),
             0
-        ) AS AS table_purge_candidate_count
+        ) AS table_purge_candidate_count
     FROM
         dba_recyclebin r
         JOIN dba_users u
@@ -185,7 +185,7 @@ SELECT
     a.object_count AS application_recyclebin_objects,
     ROUND(a.total_space_bytes / 1024 / 1024, 2) AS application_space_mb,
     a.purge_capable_object_count,
-    a.table_purge_candidate_count,,
+    a.table_purge_candidate_count,
     o.object_count AS oracle_maintained_recyclebin_objects,
     CASE
         WHEN a.object_count = 0
@@ -197,6 +197,5 @@ SELECT
 FROM
     application_recyclebin a
     CROSS JOIN oracle_recyclebin o;
-
 PROMPT
 PROMPT Recycle Bin Inventory Completed
