@@ -20,7 +20,10 @@ SET FEEDBACK ON
 PROMPT
 PROMPT Alert Log Monitoring Threshold
 
-SELECT 24 AS alert_log_lookback_hours FROM dual;
+SELECT
+    24 AS alert_log_lookback_hours
+FROM
+    dual;
 
 PROMPT
 PROMPT Recent Critical Alert Log Entries (Last 24 Hours)
@@ -30,7 +33,7 @@ SELECT
     message_type,
     message_level,
     problem_key,
-    SUBSTR(message_text,1,200) AS message_text
+    SUBSTR(message_text, 1, 200) AS message_text
 FROM
     v$diag_alert_ext
 WHERE
@@ -38,7 +41,7 @@ WHERE
     AND (
         UPPER(message_text) LIKE '%ORA-%'
         OR UPPER(message_text) LIKE '%TNS-%'
-        OR message_type IN (2,3)
+        OR message_type IN (2, 3)
     )
 ORDER BY
     originating_timestamp DESC;
@@ -47,9 +50,30 @@ PROMPT
 PROMPT Alert Counts By Category (Last 24 Hours)
 
 SELECT
-    SUM(CASE WHEN UPPER(message_text) LIKE '%ORA-%' THEN 1 ELSE 0 END) AS ora_messages,
-    SUM(CASE WHEN UPPER(message_text) LIKE '%TNS-%' THEN 1 ELSE 0 END) AS tns_messages,
-    SUM(CASE WHEN message_type IN (2,3) THEN 1 ELSE 0 END) AS critical_messages
+    NVL(
+        SUM(
+            CASE
+                WHEN UPPER(message_text) LIKE '%ORA-%' THEN 1
+                ELSE 0
+            END
+        ), 0
+    ) AS ora_messages,
+    NVL(
+        SUM(
+            CASE
+                WHEN UPPER(message_text) LIKE '%TNS-%' THEN 1
+                ELSE 0
+            END
+        ), 0
+    ) AS tns_messages,
+    NVL(
+        SUM(
+            CASE
+                WHEN message_type IN (2, 3) THEN 1
+                ELSE 0
+            END
+        ), 0
+    ) AS critical_messages
 FROM
     v$diag_alert_ext
 WHERE
@@ -58,29 +82,59 @@ WHERE
 PROMPT
 PROMPT Alert Log Status Summary
 
-WITH s AS (
-SELECT
-NVL(SUM(CASE WHEN UPPER(message_text) LIKE '%ORA-%' THEN 1 ELSE 0 END),0) ora_cnt,
-NVL(SUM(CASE WHEN UPPER(message_text) LIKE '%TNS-%' THEN 1 ELSE 0 END),0) tns_cnt,
-NVL(SUM(CASE WHEN message_type IN (2,3) THEN 1 ELSE 0 END),0) crit_cnt
-FROM v$diag_alert_ext
-WHERE originating_timestamp >= SYSTIMESTAMP - INTERVAL '24' HOUR
+WITH alert_counts AS (
+    SELECT
+        NVL(
+            SUM(
+                CASE
+                    WHEN UPPER(message_text) LIKE '%ORA-%' THEN 1
+                    ELSE 0
+                END
+            ), 0
+        ) AS ora_messages,
+        NVL(
+            SUM(
+                CASE
+                    WHEN UPPER(message_text) LIKE '%TNS-%' THEN 1
+                    ELSE 0
+                END
+            ), 0
+        ) AS tns_messages,
+        NVL(
+            SUM(
+                CASE
+                    WHEN message_type IN (2, 3) THEN 1
+                    ELSE 0
+                END
+            ), 0
+        ) AS critical_messages
+    FROM
+        v$diag_alert_ext
+    WHERE
+        originating_timestamp >= SYSTIMESTAMP - INTERVAL '24' HOUR
 )
 SELECT
-ora_cnt,
-tns_cnt,
-crit_cnt,
-CASE
-WHEN crit_cnt>0 OR ora_cnt>0 THEN 'REVIEW REQUIRED'
-ELSE 'HEALTHY'
-END AS alert_log_state,
-CASE
-WHEN crit_cnt>0 THEN 'CRITICAL ALERTS FOUND'
-WHEN ora_cnt>0 THEN 'ORA MESSAGES FOUND'
-WHEN tns_cnt>0 THEN 'TNS MESSAGES FOUND'
-ELSE 'NO CRITICAL ALERT LOG ENTRIES'
-END AS primary_monitoring_message
-FROM s;
+    ora_messages,
+    tns_messages,
+    critical_messages,
+    CASE
+        WHEN critical_messages > 0
+            OR ora_messages > 0
+            OR tns_messages > 0
+        THEN 'REVIEW REQUIRED'
+        ELSE 'HEALTHY'
+    END AS alert_log_state,
+    CASE
+        WHEN critical_messages > 0
+            THEN 'CRITICAL ALERTS FOUND'
+        WHEN ora_messages > 0
+            THEN 'ORA MESSAGES FOUND'
+        WHEN tns_messages > 0
+            THEN 'TNS MESSAGES FOUND'
+        ELSE 'NO CRITICAL ALERT LOG ENTRIES'
+    END AS primary_monitoring_message
+FROM
+    alert_counts;
 
 PROMPT
 PROMPT Alert Log Inventory Completed
