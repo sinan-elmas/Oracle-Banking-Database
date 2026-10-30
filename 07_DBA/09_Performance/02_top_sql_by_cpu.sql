@@ -263,7 +263,7 @@ SELECT
         / 1000000,
         6
     ) AS cpu_per_exec,
-    NVL(SUM(rows_processed), 0) AS rows
+    NVL(SUM(rows_processed), 0) AS rows_processed
 FROM
     sql_category
 GROUP BY
