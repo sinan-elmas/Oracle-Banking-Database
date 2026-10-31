@@ -1,3 +1,4 @@
+
 /*
   Script  : 05_top_sql_by_disk_reads.sql
   Project : Oracle Banking Database - DBA Lab
@@ -13,7 +14,6 @@
     value may indicate an I/O-intensive access path.
   - Total and per-execution physical reads must be evaluated together.
   - Application and Oracle-maintained workloads are reported separately.
-  - CURRENT_PROGRAM is current-session context, not historical attribution.
   - No AWR, ASH, ADDM, DBA_HIST_*, or Diagnostics Pack dependency is used.
 */
 
@@ -44,48 +44,23 @@ FROM
 PROMPT
 PROMPT Top Application SQL By Total Disk Reads
 
-WITH current_session_program AS (
-    SELECT
-        s.sql_id,
-        s.sql_child_number AS child_number,
-        MAX(s.program) AS current_program
-    FROM
-        v$session s
-    WHERE
-        s.type = 'USER'
-        AND s.status = 'ACTIVE'
-        AND s.sql_id IS NOT NULL
-    GROUP BY
-        s.sql_id,
-        s.sql_child_number
-),
-sql_rows AS (
+WITH sql_rows AS (
     SELECT
         q.sql_id,
         q.child_number,
         q.plan_hash_value,
         q.parsing_schema_name,
-        q.module,
-        q.action,
-        csp.current_program,
         q.executions,
         q.disk_reads,
         q.buffer_gets,
         q.rows_processed,
-        q.parse_calls,
         q.cpu_time,
         q.elapsed_time,
-        q.user_io_wait_time,
-        q.users_executing,
-        q.last_active_time,
-        q.sql_text
+        q.user_io_wait_time
     FROM
         v$sql q
         LEFT JOIN dba_users u
             ON u.username = q.parsing_schema_name
-        LEFT JOIN current_session_program csp
-            ON csp.sql_id = q.sql_id
-           AND csp.child_number = q.child_number
     WHERE
         NVL(u.oracle_maintained, 'N') = 'N'
         AND q.disk_reads > 0
@@ -94,47 +69,19 @@ sql_rows AS (
 ranked_sql AS (
     SELECT
         sql_id,
-        child_number,
-        plan_hash_value,
-        parsing_schema_name,
-        module,
-        action,
-        current_program,
-        executions,
-        disk_reads AS total_disk_reads,
+        child_number AS child_no,
+        plan_hash_value AS plan_hash,
+        parsing_schema_name AS schema_name,
+        executions AS execs,
+        disk_reads,
         ROUND(
             disk_reads / NULLIF(executions, 0),
             2
-        ) AS disk_reads_per_execution,
-        buffer_gets AS total_buffer_gets,
-        ROUND(
-            buffer_gets / NULLIF(executions, 0),
-            2
-        ) AS buffer_gets_per_execution,
+        ) AS reads_per_exec,
+        buffer_gets,
         rows_processed,
-        ROUND(
-            rows_processed / NULLIF(executions, 0),
-            2
-        ) AS rows_per_execution,
-        parse_calls,
-        ROUND(cpu_time / 1000000, 4)
-            AS total_cpu_seconds,
-        ROUND(elapsed_time / 1000000, 4)
-            AS total_elapsed_seconds,
-        ROUND(user_io_wait_time / 1000000, 4)
-            AS user_io_wait_seconds,
-        users_executing,
-        TO_CHAR(last_active_time, 'DD-MON-YYYY HH24:MI:SS')
-            AS last_active_time,
-        SUBSTR(
-            REPLACE(
-                REPLACE(sql_text, CHR(10), ' '),
-                CHR(13),
-                ' '
-            ),
-            1,
-            500
-        ) AS sql_text,
+        ROUND(elapsed_time / 1000000, 4) AS elapsed_sec,
+        ROUND(user_io_wait_time / 1000000, 4) AS io_wait_sec,
         ROW_NUMBER() OVER (
             ORDER BY
                 disk_reads DESC,
@@ -146,26 +93,16 @@ ranked_sql AS (
 )
 SELECT
     sql_id,
-    child_number,
-    plan_hash_value,
-    parsing_schema_name,
-    module,
-    action,
-    current_program,
-    executions,
-    total_disk_reads,
-    disk_reads_per_execution,
-    total_buffer_gets,
-    buffer_gets_per_execution,
+    child_no,
+    plan_hash,
+    schema_name,
+    execs,
+    disk_reads,
+    reads_per_exec,
+    buffer_gets,
     rows_processed,
-    rows_per_execution,
-    parse_calls,
-    total_cpu_seconds,
-    total_elapsed_seconds,
-    user_io_wait_seconds,
-    users_executing,
-    last_active_time,
-    sql_text
+    elapsed_sec,
+    io_wait_sec
 FROM
     ranked_sql
 WHERE
@@ -176,48 +113,23 @@ ORDER BY
 PROMPT
 PROMPT Top Application SQL By Disk Reads Per Execution
 
-WITH current_session_program AS (
-    SELECT
-        s.sql_id,
-        s.sql_child_number AS child_number,
-        MAX(s.program) AS current_program
-    FROM
-        v$session s
-    WHERE
-        s.type = 'USER'
-        AND s.status = 'ACTIVE'
-        AND s.sql_id IS NOT NULL
-    GROUP BY
-        s.sql_id,
-        s.sql_child_number
-),
-sql_rows AS (
+WITH sql_rows AS (
     SELECT
         q.sql_id,
         q.child_number,
         q.plan_hash_value,
         q.parsing_schema_name,
-        q.module,
-        q.action,
-        csp.current_program,
         q.executions,
         q.disk_reads,
         q.buffer_gets,
         q.rows_processed,
-        q.parse_calls,
         q.cpu_time,
         q.elapsed_time,
-        q.user_io_wait_time,
-        q.users_executing,
-        q.last_active_time,
-        q.sql_text
+        q.user_io_wait_time
     FROM
         v$sql q
         LEFT JOIN dba_users u
             ON u.username = q.parsing_schema_name
-        LEFT JOIN current_session_program csp
-            ON csp.sql_id = q.sql_id
-           AND csp.child_number = q.child_number
     WHERE
         NVL(u.oracle_maintained, 'N') = 'N'
         AND q.disk_reads > 0
@@ -227,41 +139,19 @@ sql_rows AS (
 ranked_sql AS (
     SELECT
         sql_id,
-        child_number,
-        plan_hash_value,
-        parsing_schema_name,
-        module,
-        action,
-        current_program,
-        executions,
-        disk_reads AS total_disk_reads,
-        ROUND(disk_reads / executions, 2)
-            AS disk_reads_per_execution,
-        buffer_gets AS total_buffer_gets,
-        ROUND(buffer_gets / executions, 2)
-            AS buffer_gets_per_execution,
+        child_number AS child_no,
+        plan_hash_value AS plan_hash,
+        parsing_schema_name AS schema_name,
+        executions AS execs,
+        disk_reads,
+        ROUND(
+            disk_reads / executions,
+            2
+        ) AS reads_per_exec,
+        buffer_gets,
         rows_processed,
-        ROUND(rows_processed / executions, 2)
-            AS rows_per_execution,
-        parse_calls,
-        ROUND(cpu_time / 1000000, 4)
-            AS total_cpu_seconds,
-        ROUND(elapsed_time / 1000000, 4)
-            AS total_elapsed_seconds,
-        ROUND(user_io_wait_time / 1000000, 4)
-            AS user_io_wait_seconds,
-        users_executing,
-        TO_CHAR(last_active_time, 'DD-MON-YYYY HH24:MI:SS')
-            AS last_active_time,
-        SUBSTR(
-            REPLACE(
-                REPLACE(sql_text, CHR(10), ' '),
-                CHR(13),
-                ' '
-            ),
-            1,
-            500
-        ) AS sql_text,
+        ROUND(elapsed_time / 1000000, 4) AS elapsed_sec,
+        ROUND(user_io_wait_time / 1000000, 4) AS io_wait_sec,
         ROW_NUMBER() OVER (
             ORDER BY
                 disk_reads / executions DESC,
@@ -274,26 +164,16 @@ ranked_sql AS (
 )
 SELECT
     sql_id,
-    child_number,
-    plan_hash_value,
-    parsing_schema_name,
-    module,
-    action,
-    current_program,
-    executions,
-    total_disk_reads,
-    disk_reads_per_execution,
-    total_buffer_gets,
-    buffer_gets_per_execution,
+    child_no,
+    plan_hash,
+    schema_name,
+    execs,
+    disk_reads,
+    reads_per_exec,
+    buffer_gets,
     rows_processed,
-    rows_per_execution,
-    parse_calls,
-    total_cpu_seconds,
-    total_elapsed_seconds,
-    user_io_wait_seconds,
-    users_executing,
-    last_active_time,
-    sql_text
+    elapsed_sec,
+    io_wait_sec
 FROM
     ranked_sql
 WHERE
@@ -304,43 +184,21 @@ ORDER BY
 PROMPT
 PROMPT Top Oracle Maintained SQL By Total Disk Reads
 
-WITH current_session_program AS (
-    SELECT
-        s.sql_id,
-        s.sql_child_number AS child_number,
-        MAX(s.program) AS current_program
-    FROM
-        v$session s
-    WHERE
-        s.sql_id IS NOT NULL
-    GROUP BY
-        s.sql_id,
-        s.sql_child_number
-),
-sql_rows AS (
+WITH sql_rows AS (
     SELECT
         q.sql_id,
         q.child_number,
         q.plan_hash_value,
         q.parsing_schema_name,
-        q.module,
-        q.action,
-        csp.current_program,
         q.executions,
         q.disk_reads,
         q.buffer_gets,
         q.rows_processed,
-        q.user_io_wait_time,
-        q.users_executing,
-        q.last_active_time,
-        q.sql_text
+        q.user_io_wait_time
     FROM
         v$sql q
         JOIN dba_users u
             ON u.username = q.parsing_schema_name
-        LEFT JOIN current_session_program csp
-            ON csp.sql_id = q.sql_id
-           AND csp.child_number = q.child_number
     WHERE
         u.oracle_maintained = 'Y'
         AND q.disk_reads > 0
@@ -349,34 +207,18 @@ sql_rows AS (
 ranked_sql AS (
     SELECT
         sql_id,
-        child_number,
-        plan_hash_value,
-        parsing_schema_name,
-        module,
-        action,
-        current_program,
-        executions,
-        disk_reads AS total_disk_reads,
+        child_number AS child_no,
+        plan_hash_value AS plan_hash,
+        parsing_schema_name AS schema_name,
+        executions AS execs,
+        disk_reads,
         ROUND(
             disk_reads / NULLIF(executions, 0),
             2
-        ) AS disk_reads_per_execution,
-        buffer_gets AS total_buffer_gets,
+        ) AS reads_per_exec,
+        buffer_gets,
         rows_processed,
-        ROUND(user_io_wait_time / 1000000, 4)
-            AS user_io_wait_seconds,
-        users_executing,
-        TO_CHAR(last_active_time, 'DD-MON-YYYY HH24:MI:SS')
-            AS last_active_time,
-        SUBSTR(
-            REPLACE(
-                REPLACE(sql_text, CHR(10), ' '),
-                CHR(13),
-                ' '
-            ),
-            1,
-            500
-        ) AS sql_text,
+        ROUND(user_io_wait_time / 1000000, 4) AS io_wait_sec,
         ROW_NUMBER() OVER (
             ORDER BY
                 disk_reads DESC,
@@ -388,21 +230,15 @@ ranked_sql AS (
 )
 SELECT
     sql_id,
-    child_number,
-    plan_hash_value,
-    parsing_schema_name,
-    module,
-    action,
-    current_program,
-    executions,
-    total_disk_reads,
-    disk_reads_per_execution,
-    total_buffer_gets,
+    child_no,
+    plan_hash,
+    schema_name,
+    execs,
+    disk_reads,
+    reads_per_exec,
+    buffer_gets,
     rows_processed,
-    user_io_wait_seconds,
-    users_executing,
-    last_active_time,
-    sql_text
+    io_wait_sec
 FROM
     ranked_sql
 WHERE
@@ -434,25 +270,27 @@ WITH sql_category AS (
         AND q.sql_id IS NOT NULL
 )
 SELECT
-    workload_category,
-    COUNT(*) AS child_cursor_count,
-    NVL(SUM(executions), 0) AS executions,
-    NVL(SUM(disk_reads), 0) AS total_disk_reads,
+    workload_category AS category,
+    COUNT(*) AS child_count,
+    NVL(SUM(executions), 0) AS execs,
+    NVL(SUM(disk_reads), 0) AS disk_reads,
     ROUND(
         NVL(SUM(disk_reads), 0)
         / NULLIF(SUM(executions), 0),
         2
-    ) AS disk_reads_per_execution,
-    NVL(SUM(buffer_gets), 0) AS total_buffer_gets,
-    ROUND(NVL(SUM(user_io_wait_time), 0) / 1000000, 4)
-        AS user_io_wait_seconds,
+    ) AS reads_per_exec,
+    NVL(SUM(buffer_gets), 0) AS buffer_gets,
+    ROUND(
+        NVL(SUM(user_io_wait_time), 0) / 1000000,
+        4
+    ) AS io_wait_sec,
     NVL(SUM(rows_processed), 0) AS rows_processed
 FROM
     sql_category
 GROUP BY
     workload_category
 ORDER BY
-    total_disk_reads DESC;
+    disk_reads DESC;
 
 PROMPT
 PROMPT Top SQL By Disk Reads Completed
