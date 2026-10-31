@@ -1,3 +1,4 @@
+
 /*
   Script  : 01_sql_cache_overview.sql
   Project : Oracle Banking Database - DBA Lab
@@ -76,8 +77,7 @@ SELECT
         2
     ) AS shared_pool_used_mb,
     ROUND(
-        free_shared_pool_bytes
-        * 100
+        free_shared_pool_bytes * 100
         / NULLIF(total_shared_pool_bytes, 0),
         2
     ) AS shared_pool_free_pct
@@ -87,27 +87,46 @@ FROM
 PROMPT
 PROMPT Largest Shared Pool Components
 
-SELECT *
-FROM (
+WITH components AS (
     SELECT
         name,
-        ROUND(bytes / 1024 / 1024, 2) AS component_mb,
-        ROUND(
-            bytes
-            * 100
-            / NULLIF(SUM(bytes) OVER (), 0),
-            2
-        ) AS shared_pool_pct
+        SUM(bytes) AS component_bytes
     FROM
         v$sgastat
     WHERE
         pool = 'shared pool'
-    ORDER BY
-        bytes DESC,
+    GROUP BY
         name
+),
+ranked_components AS (
+    SELECT
+        name,
+        component_bytes,
+        SUM(component_bytes) OVER ()
+            AS total_shared_pool_bytes,
+        ROW_NUMBER() OVER (
+            ORDER BY
+                component_bytes DESC,
+                name
+        ) AS row_number_value
+    FROM
+        components
 )
+SELECT
+    name,
+    ROUND(component_bytes / 1024 / 1024, 2)
+        AS component_mb,
+    ROUND(
+        component_bytes * 100
+        / NULLIF(total_shared_pool_bytes, 0),
+        2
+    ) AS shared_pool_pct
+FROM
+    ranked_components
 WHERE
-    ROWNUM <= 20;
+    row_number_value <= 20
+ORDER BY
+    row_number_value;
 
 PROMPT
 PROMPT Shared SQL Area Summary
@@ -184,18 +203,30 @@ WITH selected_statistics AS (
 ),
 statistics_pivot AS (
     SELECT
-        NVL(MAX(CASE WHEN name = 'execute count' THEN value END), 0)
-            AS execute_count,
-        NVL(MAX(CASE WHEN name = 'parse count (total)' THEN value END), 0)
-            AS parse_count_total,
-        NVL(MAX(CASE WHEN name = 'parse count (hard)' THEN value END), 0)
-            AS parse_count_hard,
-        NVL(MAX(CASE WHEN name = 'session cursor cache hits' THEN value END), 0)
-            AS session_cursor_cache_hits,
-        NVL(MAX(CASE WHEN name = 'opened cursors cumulative' THEN value END), 0)
-            AS opened_cursors_cumulative,
-        NVL(MAX(CASE WHEN name = 'opened cursors current' THEN value END), 0)
-            AS opened_cursors_current
+        NVL(
+            MAX(CASE WHEN name = 'execute count' THEN value END),
+            0
+        ) AS execute_count,
+        NVL(
+            MAX(CASE WHEN name = 'parse count (total)' THEN value END),
+            0
+        ) AS parse_count_total,
+        NVL(
+            MAX(CASE WHEN name = 'parse count (hard)' THEN value END),
+            0
+        ) AS parse_count_hard,
+        NVL(
+            MAX(CASE WHEN name = 'session cursor cache hits' THEN value END),
+            0
+        ) AS session_cursor_cache_hits,
+        NVL(
+            MAX(CASE WHEN name = 'opened cursors cumulative' THEN value END),
+            0
+        ) AS opened_cursors_cumulative,
+        NVL(
+            MAX(CASE WHEN name = 'opened cursors current' THEN value END),
+            0
+        ) AS opened_cursors_current
     FROM
         selected_statistics
 )
@@ -204,14 +235,12 @@ SELECT
     parse_count_total,
     parse_count_hard,
     ROUND(
-        parse_count_hard
-        * 100
+        parse_count_hard * 100
         / NULLIF(parse_count_total, 0),
         2
     ) AS hard_parse_pct_of_parses,
     ROUND(
-        parse_count_total
-        * 100
+        parse_count_total * 100
         / NULLIF(execute_count, 0),
         2
     ) AS parse_to_execute_pct,
@@ -348,21 +377,18 @@ calculated_state AS (
         c.high_version_parent_count,
         c.sql_invalidations,
         ROUND(
-            sp.free_shared_pool_bytes
-            * 100
+            sp.free_shared_pool_bytes * 100
             / NULLIF(sp.total_shared_pool_bytes, 0),
             2
         ) AS shared_pool_free_pct,
         ROUND(
-            lc.total_reloads
-            * 100
+            lc.total_reloads * 100
             / NULLIF(lc.total_pins, 0),
             4
         ) AS library_cache_reload_pct,
         lc.total_invalidations AS library_cache_invalidations,
         ROUND(
-            ps.parse_count_hard
-            * 100
+            ps.parse_count_hard * 100
             / NULLIF(ps.parse_count_total, 0),
             2
         ) AS hard_parse_pct
@@ -378,11 +404,7 @@ SELECT
     parent_cursor_count,
     child_cursor_count,
     high_version_parent_count,
-    sql_invalidations,
     shared_pool_free_pct,
-    library_cache_reload_pct,
-    library_cache_invalidations,
-    hard_parse_pct,
     CASE
         WHEN uptime_minutes < 30
         THEN 'CACHE WARM-UP PERIOD'
