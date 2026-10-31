@@ -1,22 +1,30 @@
+
 /*
   Script  : 06_active_session_waits.sql
   Project : Oracle Banking Database - DBA Lab
-  Purpose : Reports active foreground sessions, non-idle waits, recent wait
-            history, SQL context, and blocking information.
+  Purpose : Reports active foreground sessions, non-idle waits,
+            recent wait history, blocking information, and
+            blocking/blocked session relationships.
   Run As  : SYSDBA
   Usage   : @06_active_session_waits.sql
 
   Notes
   -----
   - This script is read-only.
-  - The primary report focuses on active foreground sessions owned by
-    non-Oracle-maintained users.
-  - Oracle-maintained foreground sessions are reported separately.
-  - Background processes and idle waits are excluded from the main analysis.
-  - SYS foreground activity is not hidden automatically.
-  - V$SESSION_WAIT_HISTORY contains only a short in-memory wait history;
-    it is not a complete historical repository.
-  - No AWR, ASH, ADDM, DBA_HIST_*, or Diagnostics Pack dependency is used.
+  - Active application sessions are reported separately from
+    Oracle-maintained foreground sessions.
+  - Background processes are excluded from the main reports.
+  - The current SQLcl session is excluded from session reports.
+  - The recent wait history report includes both ACTIVE and
+    INACTIVE application sessions.
+  - V$SESSION_WAIT_HISTORY contains only a short in-memory
+    wait history, not a complete historical repository.
+  - Blocking relationships are reported separately, including
+    INACTIVE blocking sessions when available.
+  - SYS foreground activity is not hidden automatically from
+    the Oracle-maintained session report.
+  - No AWR, ASH, ADDM, DBA_HIST_*, or Diagnostics Pack
+    dependency is used.
 */
 
 SET SQLFORMAT ANSICONSOLE
@@ -29,8 +37,11 @@ SET TRIMSPOOL ON
 SET TAB OFF
 SET SQLBLANKLINES ON
 
+
 PROMPT
-PROMPT Active Session Wait Metric Scope
+PROMPT ============================================================
+PROMPT 1. Active Session Wait Metric Scope
+PROMPT ============================================================
 
 SELECT
     'CURRENT SESSION STATE AND SHORT IN-MEMORY WAIT HISTORY'
@@ -44,8 +55,11 @@ SELECT
 FROM
     v$instance i;
 
+
 PROMPT
-PROMPT Active Application Foreground Sessions
+PROMPT ============================================================
+PROMPT 2. Active Application Foreground Sessions
+PROMPT ============================================================
 
 WITH current_session AS (
     SELECT
@@ -60,37 +74,16 @@ active_sessions AS (
         s.sid,
         s.serial#,
         s.username,
-        s.status,
         s.sql_id,
-        s.sql_child_number,
-        q.plan_hash_value,
         s.event,
         s.wait_class,
         s.state,
         s.seconds_in_wait,
-        s.wait_time_micro,
-        s.time_since_last_wait_micro,
-        s.blocking_session_status,
-        s.blocking_session,
-        s.final_blocking_session_status,
-        s.final_blocking_session,
-        s.module,
-        s.action,
-        s.machine,
-        s.program,
-        s.client_identifier,
-        s.logon_time,
-        q.executions,
-        q.rows_processed,
-        q.last_active_time,
-        q.sql_text
+        s.blocking_session
     FROM
         v$session s
         JOIN dba_users u
             ON u.username = s.username
-        LEFT JOIN v$sql q
-            ON q.sql_id = s.sql_id
-           AND q.child_number = s.sql_child_number
         CROSS JOIN current_session cs
     WHERE
         s.type = 'USER'
@@ -102,10 +95,7 @@ SELECT
     sid,
     serial#,
     username,
-    status,
     sql_id,
-    sql_child_number,
-    plan_hash_value,
     CASE
         WHEN state = 'WAITING'
          AND wait_class <> 'Idle'
@@ -116,42 +106,15 @@ SELECT
         THEN 'IDLE WAIT'
 
         WHEN state LIKE 'WAITED%'
-        THEN 'ON CPU OR RUNNABLE - LAST WAIT SHOWN'
+        THEN 'ON CPU / LAST WAIT'
 
-        ELSE 'ON CPU OR RUNNABLE'
-    END AS session_activity_state,
-    event,
+        ELSE 'ON CPU / RUNNABLE'
+    END AS activity_state,
+    SUBSTR(event, 1, 35) AS event,
     wait_class,
     state AS wait_state,
     seconds_in_wait,
-    ROUND(wait_time_micro / 1000000, 6)
-        AS wait_time_seconds,
-    ROUND(time_since_last_wait_micro / 1000000, 6)
-        AS seconds_since_last_wait,
-    blocking_session_status,
-    blocking_session,
-    final_blocking_session_status,
-    final_blocking_session,
-    module,
-    action,
-    machine,
-    program,
-    client_identifier,
-    TO_CHAR(logon_time, 'DD-MON-YYYY HH24:MI:SS')
-        AS logon_time,
-    executions,
-    rows_processed,
-    TO_CHAR(last_active_time, 'DD-MON-YYYY HH24:MI:SS')
-        AS last_active_time,
-    SUBSTR(
-        REPLACE(
-            REPLACE(sql_text, CHR(10), ' '),
-            CHR(13),
-            ' '
-        ),
-        1,
-        500
-    ) AS sql_text
+    blocking_session
 FROM
     active_sessions
 ORDER BY
@@ -164,8 +127,11 @@ ORDER BY
     seconds_in_wait DESC,
     sid;
 
+
 PROMPT
-PROMPT Active Application Sessions Currently Waiting
+PROMPT ============================================================
+PROMPT 3. Active Application Sessions Currently Waiting
+PROMPT ============================================================
 
 WITH current_session AS (
     SELECT
@@ -180,44 +146,16 @@ SELECT
     s.serial#,
     s.username,
     s.sql_id,
-    s.sql_child_number,
-    q.plan_hash_value,
-    s.event,
+    SUBSTR(s.event, 1, 35) AS event,
     s.wait_class,
     s.state AS wait_state,
     s.seconds_in_wait,
-    ROUND(s.wait_time_micro / 1000000, 6)
-        AS current_wait_seconds,
-    s.p1text,
-    s.p1,
-    s.p2text,
-    s.p2,
-    s.p3text,
-    s.p3,
-    s.blocking_session_status,
-    s.blocking_session,
-    s.final_blocking_session_status,
-    s.final_blocking_session,
-    s.module,
-    s.action,
-    s.machine,
-    s.program,
-    SUBSTR(
-        REPLACE(
-            REPLACE(q.sql_text, CHR(10), ' '),
-            CHR(13),
-            ' '
-        ),
-        1,
-        500
-    ) AS sql_text
+    ROUND(s.wait_time_micro / 1000000, 3) AS wait_sec,
+    s.blocking_session
 FROM
     v$session s
     JOIN dba_users u
         ON u.username = s.username
-    LEFT JOIN v$sql q
-        ON q.sql_id = s.sql_id
-       AND q.child_number = s.sql_child_number
     CROSS JOIN current_session cs
 WHERE
     s.type = 'USER'
@@ -230,8 +168,11 @@ ORDER BY
     s.seconds_in_wait DESC,
     s.sid;
 
+
 PROMPT
-PROMPT Recent Wait History For Active Application Sessions
+PROMPT ============================================================
+PROMPT 4. Recent Wait History For Application Sessions
+PROMPT ============================================================
 
 WITH current_session AS (
     SELECT
@@ -246,11 +187,8 @@ application_sessions AS (
         s.sid,
         s.serial#,
         s.username,
-        s.sql_id,
-        s.module,
-        s.action,
-        s.machine,
-        s.program
+        s.status,
+        s.sql_id
     FROM
         v$session s
         JOIN dba_users u
@@ -258,7 +196,6 @@ application_sessions AS (
         CROSS JOIN current_session cs
     WHERE
         s.type = 'USER'
-        AND s.status = 'ACTIVE'
         AND s.sid <> cs.current_sid
         AND u.oracle_maintained = 'N'
 )
@@ -266,22 +203,11 @@ SELECT
     s.sid,
     s.serial#,
     s.username,
+    s.status AS session_status,
     s.sql_id,
-    h.seq# AS wait_sequence,
-    h.event#,
-    h.event AS wait_event,
-    h.p1text,
-    h.p1,
-    h.p2text,
-    h.p2,
-    h.p3text,
-    h.p3,
-    ROUND(h.wait_time / 1000000, 6)
-        AS wait_time_seconds,
-    s.module,
-    s.action,
-    s.machine,
-    s.program
+    h.seq# AS wait_seq,
+    SUBSTR(h.event, 1, 35) AS wait_event,
+    ROUND(h.wait_time / 1000000, 3) AS wait_sec
 FROM
     application_sessions s
     JOIN v$session_wait_history h
@@ -296,8 +222,11 @@ ORDER BY
     s.sid,
     h.seq#;
 
+
 PROMPT
-PROMPT Active Oracle Maintained Foreground Sessions
+PROMPT ============================================================
+PROMPT 5. Active Oracle Maintained Foreground Sessions
+PROMPT ============================================================
 
 WITH current_session AS (
     SELECT
@@ -311,48 +240,16 @@ SELECT
     s.sid,
     s.serial#,
     s.username,
-    s.status,
     s.sql_id,
-    s.sql_child_number,
-    q.plan_hash_value,
-    CASE
-        WHEN s.state = 'WAITING'
-         AND s.wait_class <> 'Idle'
-        THEN 'CURRENTLY WAITING'
-
-        WHEN s.state LIKE 'WAITED%'
-        THEN 'ON CPU OR RUNNABLE - LAST WAIT SHOWN'
-
-        ELSE 'ON CPU OR RUNNABLE'
-    END AS session_activity_state,
-    s.event,
+    SUBSTR(s.event, 1, 35) AS event,
     s.wait_class,
     s.state AS wait_state,
     s.seconds_in_wait,
-    s.blocking_session_status,
-    s.blocking_session,
-    s.module,
-    s.action,
-    s.machine,
-    s.program,
-    TO_CHAR(s.logon_time, 'DD-MON-YYYY HH24:MI:SS')
-        AS logon_time,
-    SUBSTR(
-        REPLACE(
-            REPLACE(q.sql_text, CHR(10), ' '),
-            CHR(13),
-            ' '
-        ),
-        1,
-        500
-    ) AS sql_text
+    s.blocking_session
 FROM
     v$session s
     JOIN dba_users u
         ON u.username = s.username
-    LEFT JOIN v$sql q
-        ON q.sql_id = s.sql_id
-       AND q.child_number = s.sql_child_number
     CROSS JOIN current_session cs
 WHERE
     s.type = 'USER'
@@ -369,8 +266,11 @@ ORDER BY
     s.seconds_in_wait DESC,
     s.sid;
 
+
 PROMPT
-PROMPT Active Session Wait Summary
+PROMPT ============================================================
+PROMPT 6. Active Session Wait Summary
+PROMPT ============================================================
 
 WITH current_session AS (
     SELECT
@@ -412,6 +312,7 @@ summary_state AS (
             ),
             0
         ) AS active_application_sessions,
+
         NVL(
             SUM(
                 CASE
@@ -422,6 +323,7 @@ summary_state AS (
             ),
             0
         ) AS active_oracle_sessions,
+
         NVL(
             SUM(
                 CASE
@@ -434,6 +336,7 @@ summary_state AS (
             ),
             0
         ) AS waiting_application_sessions,
+
         NVL(
             SUM(
                 CASE
@@ -446,6 +349,7 @@ summary_state AS (
             ),
             0
         ) AS waiting_oracle_sessions,
+
         NVL(
             SUM(
                 CASE
@@ -484,5 +388,52 @@ SELECT
 FROM
     summary_state;
 
+
 PROMPT
+PROMPT ============================================================
+PROMPT 7. Blocking and Blocked Application Sessions
+PROMPT ============================================================
+
+WITH current_session AS (
+    SELECT
+        sid AS current_sid
+    FROM
+        v$mystat
+    WHERE
+        ROWNUM = 1
+)
+SELECT
+    w.sid AS waiting_sid,
+    w.username AS waiting_user,
+    SUBSTR(w.event, 1, 30) AS wait_event,
+    w.seconds_in_wait AS wait_sec,
+    b.sid AS blocking_sid,
+    b.username AS blocking_user,
+    b.status AS blocking_status,
+    CASE
+        WHEN t.addr IS NOT NULL
+        THEN 'YES'
+        ELSE 'NO'
+    END AS open_tx
+FROM
+    v$session w
+    JOIN dba_users u
+        ON u.username = w.username
+    CROSS JOIN current_session cs
+    LEFT JOIN v$session b
+        ON b.sid = w.blocking_session
+    LEFT JOIN v$transaction t
+        ON t.addr = b.taddr
+WHERE
+    w.type = 'USER'
+    AND w.sid <> cs.current_sid
+    AND u.oracle_maintained = 'N'
+    AND w.blocking_session_status = 'VALID'
+ORDER BY
+    w.seconds_in_wait DESC,
+    w.sid;
+
+PROMPT
+PROMPT ============================================================
 PROMPT Active Session Wait Inventory Completed
+PROMPT ============================================================
