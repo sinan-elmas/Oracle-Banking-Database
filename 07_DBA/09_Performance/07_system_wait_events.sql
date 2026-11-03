@@ -1,8 +1,9 @@
+
 /*
   Script  : 07_system_wait_events.sql
   Project : Oracle Banking Database - DBA Lab
-  Purpose : Reports cumulative instance-level foreground wait events and
-            foreground wait-class activity.
+  Purpose : Reports cumulative instance-level foreground wait events,
+            foreground wait-class activity, timeouts, and summary metrics.
   Run As  : SYSDBA
   Usage   : @07_system_wait_events.sql
 
@@ -16,6 +17,9 @@
   - High cumulative wait time does not independently prove a current bottleneck.
   - Results must be interpreted with uptime, workload volume, timeout counts,
     average wait time, and active-session evidence.
+  - Uptime windows are descriptive time categories, not performance diagnoses.
+  - Cumulative foreground wait seconds can exceed instance uptime seconds
+    because multiple sessions may wait concurrently.
   - No AWR, ASH, ADDM, DBA_HIST_*, or Diagnostics Pack dependency is used.
 */
 
@@ -43,10 +47,10 @@ SELECT
         AS instance_uptime_minutes,
     CASE
         WHEN (SYSDATE - i.startup_time) * 1440 < 30
-        THEN 'CACHE WARM-UP PERIOD'
+        THEN 'FIRST 30 MINUTES'
         WHEN (SYSDATE - i.startup_time) * 1440 < 120
-        THEN 'INSTANCE RECENTLY STARTED'
-        ELSE 'NORMAL INTERPRETATION WINDOW'
+        THEN 'FIRST 2 HOURS'
+        ELSE 'UPTIME 2 HOURS OR MORE'
     END AS interpretation_window
 FROM
     v$instance i;
@@ -219,7 +223,7 @@ PROMPT System Wait Event Summary
 
 WITH uptime_state AS (
     SELECT
-        ROUND((SYSDATE - startup_time) * 86400, 2)
+        (SYSDATE - startup_time) * 86400
             AS uptime_seconds,
         ROUND((SYSDATE - startup_time) * 1440, 2)
             AS uptime_minutes
@@ -238,9 +242,7 @@ event_state AS (
                 time_waited_micro_fg DESC,
                 total_waits_fg DESC,
                 event
-        ) AS event_rank,
-        SUM(time_waited_micro_fg) OVER ()
-            AS total_non_idle_wait_micro
+        ) AS event_rank
     FROM
         v$system_event
     WHERE
@@ -249,125 +251,57 @@ event_state AS (
 ),
 wait_state AS (
     SELECT
-        COUNT(DISTINCT wait_class) AS wait_class_count,
         COUNT(*) AS foreground_event_count,
         NVL(SUM(total_waits_fg), 0)
             AS total_foreground_waits,
         NVL(SUM(total_timeouts_fg), 0)
             AS total_foreground_timeouts,
         NVL(SUM(time_waited_micro_fg), 0)
-            AS total_foreground_wait_micro,
-        NVL(
-            MAX(
-                CASE
-                    WHEN total_waits_fg >= 10
-                    THEN time_waited_micro_fg
-                         / NULLIF(total_waits_fg, 0)
-                END
-            ),
-            0
-        ) AS highest_average_wait_micro
+            AS total_foreground_wait_micro
     FROM
         event_state
 ),
 top_event_state AS (
     SELECT
         event AS top_wait_event,
-        wait_class AS top_wait_class,
-        total_waits_fg AS top_event_waits,
-        time_waited_micro_fg AS top_event_wait_micro,
-        ROUND(
-            time_waited_micro_fg
-            * 100
-            / NULLIF(total_non_idle_wait_micro, 0),
-            2
-        ) AS top_event_share_pct
+        wait_class AS top_wait_class
     FROM
         event_state
     WHERE
         event_rank = 1
-),
-top_five_state AS (
-    SELECT
-        ROUND(
-            SUM(time_waited_micro_fg)
-            * 100
-            / NULLIF(MAX(total_non_idle_wait_micro), 0),
-            2
-        ) AS top_five_event_share_pct
-    FROM
-        event_state
-    WHERE
-        event_rank <= 5
 )
 SELECT
     us.uptime_minutes,
     CASE
         WHEN us.uptime_minutes < 30
-        THEN 'CACHE WARM-UP PERIOD'
+        THEN 'FIRST 30 MINUTES'
         WHEN us.uptime_minutes < 120
-        THEN 'INSTANCE RECENTLY STARTED'
-        ELSE 'NORMAL INTERPRETATION WINDOW'
+        THEN 'FIRST 2 HOURS'
+        ELSE 'UPTIME 2 HOURS OR MORE'
     END AS interpretation_window,
     ws.foreground_event_count,
     ws.total_foreground_waits,
     ws.total_foreground_timeouts,
     ROUND(ws.total_foreground_wait_micro / 1000000, 4)
-        AS total_foreground_wait_seconds,
+        AS total_fg_wait_sec,
     ROUND(
         ws.total_foreground_wait_micro
         / NULLIF(ws.total_foreground_waits, 0)
         / 1000,
         4
-    ) AS overall_average_wait_ms,
+    ) AS avg_fg_wait_ms,
     ROUND(
         ws.total_foreground_wait_micro
         / 1000000
-        / NULLIF(us.uptime_seconds, 0)
-        * 100,
-        2
-    ) AS wait_time_pct_of_single_instance_uptime,
-    ROUND(ws.highest_average_wait_micro / 1000, 4)
-        AS highest_event_average_wait_ms,
-    ws.wait_class_count,
-    tes.top_wait_event,
-    tes.top_wait_class,
-    tes.top_event_waits,
-    ROUND(tes.top_event_wait_micro / 1000000, 4)
-        AS top_event_total_wait_seconds,
-    tes.top_event_share_pct,
-    tfs.top_five_event_share_pct,
-    CASE
-        WHEN ws.foreground_event_count = 0
-        THEN 'NO FOREGROUND WAIT RECORDED'
-        WHEN us.uptime_minutes < 30
-        THEN 'CACHE WARM-UP PERIOD'
-        WHEN us.uptime_minutes < 120
-        THEN 'INSTANCE RECENTLY STARTED'
-        ELSE 'CUMULATIVE WAIT DATA AVAILABLE'
-    END AS system_wait_state,
-    CASE
-        WHEN ws.foreground_event_count = 0
-        THEN 'NO NON-IDLE FOREGROUND WAIT EVENT RECORDED'
-
-        WHEN tes.top_wait_event = 'control file heartbeat'
-         AND ws.total_foreground_wait_micro / 1000000 < 30
-        THEN 'LIGHT WORKLOAD: CONTROL FILE HEARTBEAT DOMINATES CUMULATIVE WAIT TIME'
-
-        WHEN us.uptime_minutes < 30
-        THEN 'WAIT DATA IS IN CACHE WARM-UP PERIOD'
-
-        WHEN us.uptime_minutes < 120
-        THEN 'INSTANCE RECENTLY STARTED - REVIEW WITH CURRENT SESSION CONTEXT'
-
-        ELSE 'REVIEW TOP EVENTS WITH CURRENT SESSION AND WORKLOAD CONTEXT'
-    END AS primary_interpretation
+        / NULLIF(us.uptime_seconds, 0),
+        4
+    ) AS fg_wait_sec_per_uptime_sec,
+    tes.top_wait_event
 FROM
     uptime_state us
     CROSS JOIN wait_state ws
     LEFT JOIN top_event_state tes
-        ON 1 = 1
-    CROSS JOIN top_five_state tfs;
+        ON 1 = 1;
 
 PROMPT
 PROMPT System Wait Event Inventory Completed
