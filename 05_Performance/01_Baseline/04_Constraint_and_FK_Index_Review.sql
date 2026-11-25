@@ -8,27 +8,32 @@
 -- Tool        : Oracle SQL Developer
 --
 -- Purpose
---   Establishes a read-only constraint inventory and evaluates whether each
---   foreign key is supported by an index whose leading columns match the
---   foreign-key columns in the same order.
+--   Establishes a read-only constraint inventory and reviews whether foreign
+--   keys have matching indexes before index optimization or SQL tuning.
 --
 -- Reports
+--   * Total, supported, and review-required foreign-key counts
 --   * Primary-key, unique, and foreign-key constraints
 --   * Constraint column lists
---   * Referenced parent tables
+--   * Referenced parent tables within the current schema
 --   * Selected supporting index for each foreign key
 --   * Number of matching supporting indexes
 --   * Foreign-key index-review status
 --
 -- Foreign-Key Index Matching Rules
---   * Index columns must match all foreign-key columns by position.
---   * Foreign-key columns must be the leading columns of the index.
+--   * All foreign-key columns must be present in the leading index columns.
+--   * Foreign-key columns may appear in a different order within that prefix.
 --   * An index may contain additional trailing columns.
 --   * When several indexes qualify, the shortest matching index is displayed.
+--   * Index name is used as a tie-breaker.
 --   * MATCHING_INDEX_COUNT reports the total number of qualifying indexes.
 --
 -- Important Notes
---   * A foreign key without a supporting index is not automatically incorrect.
+--   * This report evaluates visible, valid, nonpartitioned B-tree indexes,
+--     including function-based B-tree indexes with matching leading columns.
+--   * Invisible and partitioned indexes require separate evaluation.
+--   * Cross-schema parent tables are outside the parent-table lookup scope.
+--   * A foreign key without a qualifying index is not automatically incorrect.
 --   * Index requirements depend on parent-table DML, locking behavior,
 --     application workload, selectivity, and execution-plan evidence.
 --   * This report does not create or recommend indexes automatically.
@@ -59,267 +64,69 @@ COLUMN fk_index_status        FORMAT A15
 
 PROMPT
 PROMPT ================================================================================
-PROMPT CONSTRAINT AND FOREIGN-KEY INDEX BASELINE
-PROMPT ================================================================================
-PROMPT
-
-WITH constraint_column_lists AS
-(
-    SELECT
-        cols.constraint_name,
-
-        LISTAGG(
-            cols.column_name,
-            ', '
-        ) WITHIN GROUP
-          (
-              ORDER BY cols.position
-          ) AS constraint_columns,
-
-        COUNT(*) AS constraint_column_count
-
-    FROM user_cons_columns cols
-
-    GROUP BY
-        cols.constraint_name
-),
-
-index_column_counts AS
-(
-    SELECT
-        cols.index_name,
-        COUNT(*) AS index_column_count
-
-    FROM user_ind_columns cols
-
-    GROUP BY
-        cols.index_name
-),
-
-foreign_key_index_candidates AS
-(
-    SELECT
-        fk.constraint_name,
-        idx.index_name,
-        idx.index_type,
-        idx.uniqueness,
-        idx_cols.index_column_count,
-        fk_cols.constraint_column_count,
-
-        ROW_NUMBER() OVER
-        (
-            PARTITION BY fk.constraint_name
-            ORDER BY
-                CASE
-                    WHEN idx_cols.index_column_count =
-                         fk_cols.constraint_column_count
-                        THEN 0
-                    ELSE 1
-                END,
-                idx_cols.index_column_count,
-                idx.index_name
-        ) AS candidate_rank,
-
-        COUNT(*) OVER
-        (
-            PARTITION BY fk.constraint_name
-        ) AS matching_index_count
-
-    FROM user_constraints fk
-
-    JOIN constraint_column_lists fk_cols
-      ON fk_cols.constraint_name = fk.constraint_name
-
-    JOIN user_indexes idx
-      ON idx.table_name = fk.table_name
-     AND idx.status = 'VALID'
-     AND idx.visibility = 'VISIBLE'
-
-    JOIN index_column_counts idx_cols
-      ON idx_cols.index_name = idx.index_name
-     AND idx_cols.index_column_count >= fk_cols.constraint_column_count
-
-    WHERE fk.constraint_type = 'R'
-
-      AND NOT EXISTS
-          (
-              SELECT
-                  1
-              FROM user_cons_columns fk_col
-              WHERE fk_col.constraint_name = fk.constraint_name
-
-                AND NOT EXISTS
-                    (
-                        SELECT
-                            1
-                        FROM user_ind_columns idx_col
-                        WHERE idx_col.index_name = idx.index_name
-                          AND idx_col.column_position = fk_col.position
-                          AND idx_col.column_name = fk_col.column_name
-                    )
-          )
-),
-
-selected_foreign_key_indexes AS
-(
-    SELECT
-        constraint_name,
-        index_name,
-        matching_index_count
-
-    FROM foreign_key_index_candidates
-
-    WHERE candidate_rank = 1
-)
-
-SELECT
-    con.table_name,
-    con.constraint_name,
-
-    CASE con.constraint_type
-        WHEN 'P' THEN 'PRIMARY KEY'
-        WHEN 'U' THEN 'UNIQUE'
-        WHEN 'R' THEN 'FOREIGN KEY'
-        ELSE con.constraint_type
-    END AS constraint_type,
-
-    con.status AS constraint_status,
-    con.validated,
-
-    parent_con.table_name AS parent_table,
-
-    cols.constraint_columns,
-
-    selected_idx.index_name AS supporting_index,
-
-    CASE
-        WHEN con.constraint_type = 'R'
-            THEN NVL(selected_idx.matching_index_count, 0)
-        ELSE
-            NULL
-    END AS matching_index_count,
-
-    CASE
-        WHEN con.constraint_type <> 'R'
-            THEN '-'
-        WHEN selected_idx.index_name IS NOT NULL
-            THEN 'SUPPORTED'
-        ELSE
-            'REVIEW'
-    END AS fk_index_status
-
-FROM user_constraints con
-
-LEFT JOIN user_constraints parent_con
-       ON parent_con.constraint_name = con.r_constraint_name
-      AND con.constraint_type = 'R'
-
-LEFT JOIN constraint_column_lists cols
-       ON cols.constraint_name = con.constraint_name
-
-LEFT JOIN selected_foreign_key_indexes selected_idx
-       ON selected_idx.constraint_name = con.constraint_name
-
-WHERE con.constraint_type IN ('P', 'U', 'R')
-
-ORDER BY
-    con.table_name,
-    CASE con.constraint_type
-        WHEN 'P' THEN 1
-        WHEN 'U' THEN 2
-        WHEN 'R' THEN 3
-        ELSE 4
-    END,
-    con.constraint_name;
-
-PROMPT
-PROMPT ================================================================================
 PROMPT FOREIGN-KEY INDEX REVIEW SUMMARY
 PROMPT ================================================================================
 PROMPT
 
-WITH constraint_column_counts AS
+WITH foreign_key_columns AS
 (
     SELECT
         constraint_name,
-        COUNT(*) AS constraint_column_count
-
+        COUNT(*) AS column_count
     FROM user_cons_columns
-
     GROUP BY
         constraint_name
 ),
 
-index_column_counts AS
+matching_indexes AS
 (
     SELECT
-        index_name,
-        COUNT(*) AS index_column_count
+        fk.constraint_name,
+        idx.index_name
 
-    FROM user_ind_columns
+    FROM user_constraints fk
+
+    JOIN foreign_key_columns fk_count
+      ON fk_count.constraint_name = fk.constraint_name
+
+    JOIN user_cons_columns fk_col
+      ON fk_col.constraint_name = fk.constraint_name
+
+    JOIN user_indexes idx
+      ON idx.table_name = fk.table_name
+
+    JOIN user_ind_columns idx_col
+      ON idx_col.index_name = idx.index_name
+     AND idx_col.column_name = fk_col.column_name
+     AND idx_col.column_position <= fk_count.column_count
+
+    WHERE fk.constraint_type = 'R'
+      AND idx.status = 'VALID'
+      AND idx.visibility = 'VISIBLE'
+      AND idx.partitioned = 'NO'
+      AND idx.index_type IN ('NORMAL', 'FUNCTION-BASED NORMAL')
 
     GROUP BY
-        index_name
+        fk.constraint_name,
+        idx.index_name,
+        fk_count.column_count
+
+    HAVING COUNT(DISTINCT fk_col.column_name) = fk_count.column_count
 ),
 
 supported_foreign_keys AS
 (
     SELECT DISTINCT
-        fk.constraint_name
-
-    FROM user_constraints fk
-
-    JOIN constraint_column_counts fk_cols
-      ON fk_cols.constraint_name = fk.constraint_name
-
-    JOIN user_indexes idx
-      ON idx.table_name = fk.table_name
-     AND idx.status = 'VALID'
-     AND idx.visibility = 'VISIBLE'
-
-    JOIN index_column_counts idx_cols
-      ON idx_cols.index_name = idx.index_name
-     AND idx_cols.index_column_count >= fk_cols.constraint_column_count
-
-    WHERE fk.constraint_type = 'R'
-
-      AND NOT EXISTS
-          (
-              SELECT
-                  1
-              FROM user_cons_columns fk_col
-              WHERE fk_col.constraint_name = fk.constraint_name
-
-                AND NOT EXISTS
-                    (
-                        SELECT
-                            1
-                        FROM user_ind_columns idx_col
-                        WHERE idx_col.index_name = idx.index_name
-                          AND idx_col.column_position = fk_col.position
-                          AND idx_col.column_name = fk_col.column_name
-                    )
-          )
+        constraint_name
+    FROM matching_indexes
 )
 
 SELECT
     COUNT(*) AS foreign_key_count,
 
-    SUM(
-        CASE
-            WHEN supported.constraint_name IS NOT NULL
-                THEN 1
-            ELSE 0
-        END
-    ) AS supported_fk_count,
+    COUNT(supported.constraint_name) AS supported_fk_count,
 
-    SUM(
-        CASE
-            WHEN supported.constraint_name IS NULL
-                THEN 1
-            ELSE 0
-        END
-    ) AS review_fk_count,
+    COUNT(*) - COUNT(supported.constraint_name) AS review_fk_count,
 
     TO_CHAR(
         SYSDATE,
@@ -335,16 +142,186 @@ WHERE fk.constraint_type = 'R';
 
 PROMPT
 PROMPT ================================================================================
+PROMPT CONSTRAINT AND FOREIGN-KEY INDEX DETAILS
+PROMPT ================================================================================
+PROMPT
+
+WITH constraint_columns AS
+(
+    SELECT
+        constraint_name,
+
+        LISTAGG(
+            column_name,
+            ', '
+        ) WITHIN GROUP
+          (
+              ORDER BY position
+          ) AS column_list,
+
+        COUNT(*) AS column_count
+
+    FROM user_cons_columns
+
+    GROUP BY
+        constraint_name
+),
+
+index_column_counts AS
+(
+    SELECT
+        index_name,
+        COUNT(*) AS column_count
+
+    FROM user_ind_columns
+
+    GROUP BY
+        index_name
+),
+
+matching_indexes AS
+(
+    SELECT
+        fk.constraint_name,
+        idx.index_name,
+        idx_count.column_count AS index_column_count
+
+    FROM user_constraints fk
+
+    JOIN constraint_columns fk_count
+      ON fk_count.constraint_name = fk.constraint_name
+
+    JOIN user_cons_columns fk_col
+      ON fk_col.constraint_name = fk.constraint_name
+
+    JOIN user_indexes idx
+      ON idx.table_name = fk.table_name
+
+    JOIN index_column_counts idx_count
+      ON idx_count.index_name = idx.index_name
+
+    JOIN user_ind_columns idx_col
+      ON idx_col.index_name = idx.index_name
+     AND idx_col.column_name = fk_col.column_name
+     AND idx_col.column_position <= fk_count.column_count
+
+    WHERE fk.constraint_type = 'R'
+      AND idx.status = 'VALID'
+      AND idx.visibility = 'VISIBLE'
+      AND idx.partitioned = 'NO'
+      AND idx.index_type IN ('NORMAL', 'FUNCTION-BASED NORMAL')
+
+    GROUP BY
+        fk.constraint_name,
+        idx.index_name,
+        idx_count.column_count,
+        fk_count.column_count
+
+    HAVING COUNT(DISTINCT fk_col.column_name) = fk_count.column_count
+),
+
+ranked_indexes AS
+(
+    SELECT
+        constraint_name,
+        index_name,
+
+        ROW_NUMBER() OVER
+        (
+            PARTITION BY constraint_name
+            ORDER BY
+                index_column_count,
+                index_name
+        ) AS candidate_rank,
+
+        COUNT(*) OVER
+        (
+            PARTITION BY constraint_name
+        ) AS matching_index_count
+
+    FROM matching_indexes
+)
+
+SELECT
+    con.table_name,
+    con.constraint_name,
+
+    CASE con.constraint_type
+        WHEN 'P' THEN 'PRIMARY KEY'
+        WHEN 'U' THEN 'UNIQUE'
+        WHEN 'R' THEN 'FOREIGN KEY'
+    END AS constraint_type,
+
+    con.status AS constraint_status,
+    con.validated,
+
+    parent_con.table_name AS parent_table,
+
+    cols.column_list AS constraint_columns,
+
+    idx.index_name AS supporting_index,
+
+    CASE
+        WHEN con.constraint_type = 'R'
+            THEN NVL(idx.matching_index_count, 0)
+    END AS matching_index_count,
+
+    CASE
+        WHEN con.constraint_type <> 'R'
+            THEN '-'
+        WHEN idx.index_name IS NOT NULL
+            THEN 'SUPPORTED'
+        ELSE
+            'REVIEW'
+    END AS fk_index_status
+
+FROM user_constraints con
+
+LEFT JOIN user_constraints parent_con
+       ON parent_con.constraint_name = con.r_constraint_name
+      AND parent_con.owner = con.r_owner
+      AND con.constraint_type = 'R'
+
+LEFT JOIN constraint_columns cols
+       ON cols.constraint_name = con.constraint_name
+
+LEFT JOIN ranked_indexes idx
+       ON idx.constraint_name = con.constraint_name
+      AND idx.candidate_rank = 1
+
+WHERE con.constraint_type IN ('P', 'U', 'R')
+
+ORDER BY
+    con.table_name,
+
+    CASE con.constraint_type
+        WHEN 'P' THEN 1
+        WHEN 'U' THEN 2
+        WHEN 'R' THEN 3
+    END,
+
+    con.constraint_name;
+
+PROMPT
+PROMPT ================================================================================
 PROMPT INTERPRETATION NOTES
 PROMPT ================================================================================
-PROMPT SUPPORTED means that at least one visible and valid index has matching
-PROMPT foreign-key columns as its leading columns in the same order.
+PROMPT SUPPORTED means that at least one qualifying index contains all
+PROMPT foreign-key columns within its leading column prefix.
+PROMPT Foreign-key columns do not need to appear in the same order.
 PROMPT
 PROMPT REVIEW means that no qualifying supporting index was detected.
 PROMPT REVIEW does not automatically mean that an index must be created.
 PROMPT
+PROMPT Only visible, valid, nonpartitioned normal and function-based
+PROMPT B-tree indexes are evaluated by this report.
+PROMPT Invisible, partitioned, and other index types require separate review.
+PROMPT
 PROMPT MATCHING_INDEX_COUNT may be greater than one when several existing
-PROMPT indexes share the same foreign-key leading-column prefix.
+PROMPT indexes contain the same foreign-key leading-column set.
+PROMPT
+PROMPT SUPPORTING_INDEX displays the qualifying index with the fewest columns.
+PROMPT Parent-table lookup is limited to the current schema.
 PROMPT
 PROMPT Index recommendations require workload and execution-plan evidence.
 PROMPT
