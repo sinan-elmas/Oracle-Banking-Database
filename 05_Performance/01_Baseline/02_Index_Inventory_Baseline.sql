@@ -22,8 +22,11 @@
 --   * INDEX_COLUMNS lists columns in their defined index order.
 --   * Function-based indexes are identified through INDEX_TYPE.
 --   * System-generated column names may appear for function-based indexes.
---   * INDEX_SEGMENT_MB includes index, index partition, and index subpartition
---     segments associated with the index name.
+--   * INDEX_SEGMENT_MB includes index, index partition, index subpartition,
+--     and LOBINDEX segments associated with the index name.
+--   * System-generated LOB indexes are included in the index inventory
+--     and allocated index space calculations.
+--   * LOB data segments are not included in index space calculations.
 --   * NUM_ROWS, DISTINCT_KEYS, LEAF_BLOCKS, and CLUSTERING_FACTOR are optimizer
 --     statistics and may not represent the current real-time state.
 --   * This script does not determine whether an index is useful or redundant.
@@ -76,7 +79,8 @@ WITH index_segment_sizes AS
           (
               'INDEX',
               'INDEX PARTITION',
-              'INDEX SUBPARTITION'
+              'INDEX SUBPARTITION',
+              'LOBINDEX'
           )
     GROUP BY
         segment_name
@@ -164,7 +168,8 @@ index_segment_sizes AS
           (
               'INDEX',
               'INDEX PARTITION',
-              'INDEX SUBPARTITION'
+              'INDEX SUBPARTITION',
+              'LOBINDEX'
           )
 
     GROUP BY
@@ -223,10 +228,12 @@ PROMPT =========================================================================
 PROMPT INDEX INVENTORY INTERPRETATION NOTES
 PROMPT ================================================================================
 PROMPT UNIQUE indexes may support primary-key or unique constraints.
-PROMPT NON-CONSTRAINT indexes were created independently of PK or UK constraints.
+PROMPT NON-CONSTRAINT indexes are not currently associated with PK or UK constraints.
 PROMPT A VISIBLE and VALID index is available for normal optimizer consideration.
 PROMPT Function-based indexes are identified through INDEX_TYPE.
-PROMPT INDEX_SEGMENT_MB includes index partitions and subpartitions when present.
+PROMPT INDEX_SEGMENT_MB includes index, index partition, index subpartition,
+PROMPT and LOBINDEX segments when present.
+PROMPT LOB data segments are excluded from index space calculations.
 PROMPT High CLUSTERING_FACTOR values require table and workload context.
 PROMPT Index usefulness or redundancy cannot be concluded from inventory alone.
 PROMPT
