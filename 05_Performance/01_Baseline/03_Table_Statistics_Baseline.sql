@@ -206,8 +206,10 @@ SELECT
             THEN 'LOCKED'
         WHEN stale_stats = 'YES'
             THEN 'STALE'
+        WHEN stale_stats = 'NO'
+            THEN 'OK'
         ELSE
-            'OK'
+            'UNKNOWN'
     END AS statistics_status
 
 FROM table_statistics
@@ -219,6 +221,7 @@ ORDER BY
          AND stale_stats = 'YES' THEN 2
         WHEN stale_stats = 'YES' THEN 3
         WHEN stattype_locked IS NOT NULL THEN 4
+        WHEN stale_stats = 'NO' THEN 6
         ELSE 5
     END,
     statistics_age_days DESC NULLS LAST,
@@ -230,7 +233,11 @@ PROMPT STATISTICS INTERPRETATION NOTES
 PROMPT ================================================================================
 PROMPT MISSING STATS means LAST_ANALYZED is NULL at table level.
 PROMPT STALE means Oracle considers the current optimizer statistics stale.
-PROMPT LOCKED means statistics changes are restricted until explicitly unlocked.
+PROMPT LOCKED means normal statistics modifications are restricted.
+PROMPT Supported DBMS_STATS operations may override the lock using FORCE.
+PROMPT UNKNOWN status means statistics exist and are not locked, but their
+PROMPT staleness could not be determined.
+PROMPT OK means table statistics exist, are not locked, and are not marked stale.
 PROMPT SAMPLE_PERCENT is derived from SAMPLE_SIZE and optimizer NUM_ROWS.
 PROMPT GLOBAL_STATS and USER_STATS describe how the statistics were established.
 PROMPT Statistics age alone does not prove that statistics require collection.
